@@ -6,10 +6,19 @@ player: an eligible Skill is taken automatically, an ineligible one pauses
 for a discard/give decision (rules.md sec 10). Chance spaces draw a Chance
 card and apply it to the landing Concept -- except a remove_concept effect
 (the schema only allows `chooser: "team"`), which pauses for the team's
-target choice instead. The special handlers (Agile Methods, Scrum Master,
-role swaps) are still no-ops (step 5, phase 3). After Move+Draw resolves,
-the team (PM) may remove/draw Concepts any number of times in the Close
+target choice instead. After Move+Draw resolves, the team (PM) may
+remove/draw Concepts, and (once every active Concept has passed Product
+Market Fit) swap two players' roles, any number of times in the Close
 phase before the turn actually ends (rules.md sec 8.3).
+
+Two special Skills change the turn state machine itself rather than
+buffing a Concept: Agile Methods grants its holder a second complete
+Move-Draw-Close cycle before the turn actually advances (`_end_turn`'s
+`agile_bonus_pending`); Scrum Master lets its holder delegate whatever
+decision they currently own to another player (`DelegateTurn`) -- turn
+order still rotates from the original holder's seat afterward, not the
+delegate's (`turn_owner_index`, resolved with the user --
+rules/open-questions.md #8).
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from engine.state import (
     DVFTokens,
     GameState,
     PendingCross,
+    Player,
     entry_quadrant_id,
     get_concept,
     with_concept,
@@ -81,6 +91,21 @@ class ChanceRemoveConcept:
     concept_id: str
 
 
+@dataclass(frozen=True)
+class DelegateTurn:
+    """Scrum Master: hand the rest of this turn to another player."""
+
+    recipient_id: str
+
+
+@dataclass(frozen=True)
+class RoleSwap:
+    """The team-earned swap, once every active Concept has passed PMF."""
+
+    player_a_id: str
+    player_b_id: str
+
+
 Action = (
     MoveConcept
     | CrossMilestone
@@ -90,6 +115,8 @@ Action = (
     | DiscardSkill
     | GiveSkill
     | ChanceRemoveConcept
+    | DelegateTurn
+    | RoleSwap
 )
 
 
@@ -127,37 +154,81 @@ def _deck_has_cards(deck: Deck) -> bool:
     return bool(deck.draw_pile) or bool(deck.discard_pile)
 
 
+def _holds_special(state: GameState, player: Player, handler: str) -> bool:
+    if player.skill_id is None:
+        return False
+    skill = state.data.skills[player.skill_id]
+    return any(effect.type == "special" and effect.handler == handler for effect in skill.effects)
+
+
+def _scrum_master_options(state: GameState) -> list[Action]:
+    """rules.md sec 10: usable at any point in the holder's own turn, to
+    hand the rest of it to another player. Only offered on decisions the
+    active player currently owns -- not Close/Chance-removal, which are
+    always PM-owned regardless of who's active."""
+    if not _holds_special(state, state.active_player, "scrum_master"):
+        return []
+    return [DelegateTurn(p.id) for p in state.players if p.id != state.active_player.id]
+
+
+def _role_swap_condition_met(state: GameState) -> bool:
+    """rules.md sec 3: every active Concept has passed the Product Market
+    Fit Milestone (NPD -> Scaling), i.e. is in a quadrant of order >= 3."""
+    return bool(state.portfolio) and all(
+        _quadrant_by_id(state, c.position.quadrant_id).order >= 3 for c in state.portfolio
+    )
+
+
+def _role_swap_offered(state: GameState) -> bool:
+    return (
+        not state.role_swap_used
+        and not state.role_swap_forfeited
+        and _role_swap_condition_met(state)
+    )
+
+
 def legal_actions(state: GameState) -> list[Action]:
     if is_over(state) is not None:
         return []
     if state.pending_cross is not None:
         concept_id = state.pending_cross.concept_id
-        return [CrossMilestone(concept_id, True), CrossMilestone(concept_id, False)]
+        actions: list[Action] = [
+            CrossMilestone(concept_id, True),
+            CrossMilestone(concept_id, False),
+        ]
+        return actions + _scrum_master_options(state)
     if state.pending_skill is not None:
         skill = state.data.skills[state.pending_skill]
         active_id = state.active_player.id
-        actions: list[Action] = [DiscardSkill()]
+        actions = [DiscardSkill()]
         actions.extend(
             GiveSkill(p.id)
             for p in state.players
             if p.id != active_id and p.role_id in skill.eligible_roles
         )
-        return actions
+        return actions + _scrum_master_options(state)
     if state.pending_chance_removal:
         return [ChanceRemoveConcept(c.card_id) for c in state.portfolio]
     if state.in_close_phase:
-        actions: list[Action] = []
+        actions = []
         if len(state.portfolio) > 1:
             actions.extend(RemoveConcept(c.card_id) for c in state.portfolio)
         if len(state.portfolio) < 5 and _deck_has_cards(state.concept_deck):
             actions.append(DrawConcept())
+        if _role_swap_offered(state):
+            actions.extend(
+                RoleSwap(a.id, b.id)
+                for i, a in enumerate(state.players)
+                for b in state.players[i + 1 :]
+            )
         actions.append(EndClose())
         return actions
-    return [
+    move_actions: list[Action] = [
         MoveConcept(c.card_id, direction)
         for c in state.portfolio
         for direction in ("forward", "backward")
     ]
+    return move_actions + _scrum_master_options(state)
 
 
 def _roll_die(rng_state: tuple) -> tuple[int, tuple]:
@@ -168,19 +239,41 @@ def _roll_die(rng_state: tuple) -> tuple[int, tuple]:
 
 
 def _end_turn(state: GameState) -> GameState:
-    """Finalize a resolved move/cross: stop if the game just ended, else
-    advance to the next player's turn and roll their die."""
+    """Finalize a resolved move/cross/close/give: stop if the game just
+    ended. Otherwise, either grant the turn owner's Agile Methods bonus
+    cycle (rules.md sec 10: two complete turns count as one), or actually
+    conclude the turn -- advance turn/turn_owner_index, roll the next die.
+
+    Rotation always keys off `turn_owner_index`, not `active_player_index`:
+    a Scrum Master delegation mid-turn only reassigns who's deciding, so
+    it never affects whose turn slot comes next (rules/open-questions.md
+    #8) or who's checked for Agile Methods.
+    """
     if is_over(state) is not None:
         return state
+
+    if not state.agile_bonus_pending and _holds_special(state, state.turn_owner, "agile_methods"):
+        value, new_rng_state = _roll_die(state.rng_state)
+        return dataclasses.replace(
+            state,
+            active_player_index=state.turn_owner_index,
+            rng_state=new_rng_state,
+            pending_roll=value,
+            pending_cross=None,
+            agile_bonus_pending=True,
+        )
+
     value, new_rng_state = _roll_die(state.rng_state)
-    next_index = (state.active_player_index + 1) % len(state.players)
+    next_index = (state.turn_owner_index + 1) % len(state.players)
     return dataclasses.replace(
         state,
         turn=state.turn + 1,
         active_player_index=next_index,
+        turn_owner_index=next_index,
         rng_state=new_rng_state,
         pending_roll=value,
         pending_cross=None,
+        agile_bonus_pending=False,
     )
 
 
@@ -353,7 +446,39 @@ def apply(state: GameState, action: Action) -> GameState:
         return _apply_give_skill(state, action)
     if isinstance(action, ChanceRemoveConcept):
         return _apply_chance_remove_concept(state, action)
+    if isinstance(action, DelegateTurn):
+        return _apply_delegate_turn(state, action)
+    if isinstance(action, RoleSwap):
+        return _apply_role_swap(state, action)
     raise TypeError(f"unknown action type: {type(action)!r}")
+
+
+def _apply_delegate_turn(state: GameState, action: DelegateTurn) -> GameState:
+    if state.in_close_phase or state.pending_chance_removal:
+        raise ValueError("Scrum Master can't delegate a Team-owned decision")
+    if not _holds_special(state, state.active_player, "scrum_master"):
+        raise ValueError(f"'{state.active_player.id}' does not hold Scrum Master")
+    if action.recipient_id == state.active_player.id:
+        raise ValueError("cannot delegate to yourself")
+    recipient = next((p for p in state.players if p.id == action.recipient_id), None)
+    if recipient is None:
+        raise KeyError(f"no player '{action.recipient_id}'")
+    return dataclasses.replace(state, active_player_index=state.players.index(recipient))
+
+
+def _apply_role_swap(state: GameState, action: RoleSwap) -> GameState:
+    _require_close_phase(state)
+    if not _role_swap_offered(state):
+        raise ValueError("no role swap is available")
+    if action.player_a_id == action.player_b_id:
+        raise ValueError("cannot swap a player's role with themselves")
+    players = list(state.players)
+    idx_a = next(i for i, p in enumerate(players) if p.id == action.player_a_id)
+    idx_b = next(i for i, p in enumerate(players) if p.id == action.player_b_id)
+    role_a, role_b = players[idx_a].role_id, players[idx_b].role_id
+    players[idx_a] = dataclasses.replace(players[idx_a], role_id=role_b)
+    players[idx_b] = dataclasses.replace(players[idx_b], role_id=role_a)
+    return dataclasses.replace(state, players=tuple(players), role_swap_used=True)
 
 
 def _apply_chance_remove_concept(state: GameState, action: ChanceRemoveConcept) -> GameState:
@@ -444,6 +569,11 @@ def _apply_draw_concept(state: GameState) -> GameState:
 
 def _apply_end_close(state: GameState) -> GameState:
     _require_close_phase(state)
+    # rules.md sec 3: an offered-but-unused swap is lost, permanently --
+    # even though the quadrant condition will typically stay true forever
+    # after (rules/open-questions.md #12).
+    if _role_swap_offered(state):
+        state = dataclasses.replace(state, role_swap_forfeited=True)
     return _end_turn(dataclasses.replace(state, in_close_phase=False))
 
 

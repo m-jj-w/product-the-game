@@ -8,12 +8,14 @@ from engine.engine import NewGameConfig, new_game
 from engine.rules import (
     ChanceRemoveConcept,
     CrossMilestone,
+    DelegateTurn,
     DiscardSkill,
     DrawConcept,
     EndClose,
     GiveSkill,
     MoveConcept,
     RemoveConcept,
+    RoleSwap,
     apply,
     is_over,
     legal_actions,
@@ -67,6 +69,8 @@ def _state(
     agile_bonus_pending=False,
     pending_skill=None,
     pending_chance_removal=False,
+    role_swap_used=False,
+    role_swap_forfeited=False,
     rng_seed=0,
 ) -> GameState:
     return GameState(
@@ -87,6 +91,8 @@ def _state(
         pending_roll=pending_roll,
         pending_cross=pending_cross,
         pending_skill=pending_skill,
+        role_swap_used=role_swap_used,
+        role_swap_forfeited=role_swap_forfeited,
         pending_chance_removal=pending_chance_removal,
     )
 
@@ -565,3 +571,261 @@ class TestChance:
         )
         with pytest.raises(ValueError, match="no Chance cards defined"):
             apply(state, MoveConcept("concept_0", "forward"))
+
+
+class TestAgileMethods:
+    def test_two_cycles_before_turn_and_player_advance(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="agile_methods"),
+            Player(id="p2", role_id="designer"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            turn=5,
+            in_close_phase=True,
+            # the bonus cycle's roll is whatever it is -- give it a card in
+            # every deck so landing anywhere doesn't blow up on an empty one
+            skill_deck=Deck(draw_pile=("all_roles_buff",)),
+            chance_deck=Deck(draw_pile=("test_bonus",)),
+        )
+        state = apply(state, EndClose())  # first cycle ends -> bonus granted
+        assert state.agile_bonus_pending is True
+        assert state.turn == 5  # not yet advanced
+        assert state.turn_owner_index == 0
+        assert state.active_player_index == 0  # same player, second cycle
+        assert state.in_close_phase is False
+        assert state.pending_roll is not None
+
+        state = apply(state, MoveConcept("concept_0", "forward"))
+        assert state.in_close_phase is True
+        assert state.turn == 5  # still mid-bonus-cycle
+
+        result = apply(state, EndClose())  # second cycle ends -> turn actually concludes
+        assert result.agile_bonus_pending is False
+        assert result.turn == 6
+        assert result.turn_owner_index == 1
+        assert result.active_player_index == 1
+
+    def test_picked_up_mid_turn_grants_bonus_same_turn(self) -> None:
+        players = (Player(id="p1", role_id="pm"), Player(id="p2", role_id="designer"))
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_roll=4,  # lands on a skills space
+            skill_deck=Deck(draw_pile=("agile_methods",)),
+        )
+        state = apply(state, MoveConcept("concept_0", "forward"))
+        assert state.players[0].skill_id == "agile_methods"
+        assert state.in_close_phase is True
+
+        result = apply(state, EndClose())
+        assert result.agile_bonus_pending is True  # granted this same turn
+        assert result.active_player_index == 0
+        assert result.turn == 0
+
+
+class TestScrumMaster:
+    def test_delegate_offered_during_move_and_reassigns_active_player(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="scrum_master"),
+            Player(id="p2", role_id="designer"),
+            Player(id="p3", role_id="engineer"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_roll=3,
+        )
+        actions = legal_actions(state)
+        assert DelegateTurn("p2") in actions
+        assert DelegateTurn("p3") in actions
+        assert DelegateTurn("p1") not in actions
+
+        result = apply(state, DelegateTurn("p2"))
+        assert result.active_player_index == 1
+        assert result.turn_owner_index == 0  # unchanged
+        assert result.pending_roll == 3  # still mid-move, nothing else touched
+
+    def test_delegate_offered_during_skill_decision(self) -> None:
+        players = (
+            Player(id="p1", role_id="engineer", skill_id="scrum_master"),
+            Player(id="p2", role_id="pm"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_skill="designer_buff",
+        )
+        assert DelegateTurn("p2") in legal_actions(state)
+
+    def test_delegate_not_offered_during_close_phase(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="scrum_master"),
+            Player(id="p2", role_id="designer"),
+        )
+        state = _state(
+            portfolio=[_concept()],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            in_close_phase=True,
+        )
+        assert not any(isinstance(a, DelegateTurn) for a in legal_actions(state))
+
+    def test_delegate_not_offered_during_chance_removal(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="scrum_master"),
+            Player(id="p2", role_id="designer"),
+        )
+        state = _state(
+            portfolio=[_concept()],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_chance_removal=True,
+        )
+        assert not any(isinstance(a, DelegateTurn) for a in legal_actions(state))
+
+    def test_rotation_snaps_back_to_original_holder_after_delegated_turn(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="scrum_master"),
+            Player(id="p2", role_id="designer"),
+            Player(id="p3", role_id="engineer"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            turn=2,
+            pending_roll=3,
+        )
+        state = apply(state, DelegateTurn("p3"))
+        assert state.active_player_index == 2
+        assert state.turn_owner_index == 0
+
+        state = apply(state, MoveConcept("concept_0", "forward"))  # p3 plays it out
+        assert state.in_close_phase is True
+        result = apply(state, EndClose())
+
+        # Rotation continues from the ORIGINAL holder's seat (p1, index 0), not p3's.
+        assert result.turn == 3
+        assert result.turn_owner_index == 1
+        assert result.active_player_index == 1
+
+    def test_chained_delegation_allowed(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="scrum_master"),
+            Player(id="p2", role_id="designer", skill_id="scrum_master"),
+            Player(id="p3", role_id="engineer"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_roll=3,
+        )
+        state = apply(state, DelegateTurn("p2"))
+        assert state.active_player_index == 1
+        assert DelegateTurn("p3") in legal_actions(state)
+
+        result = apply(state, DelegateTurn("p3"))
+        assert result.active_player_index == 2
+
+    def test_delegate_to_self_raises(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm", skill_id="scrum_master"),
+            Player(id="p2", role_id="designer"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_roll=3,
+        )
+        with pytest.raises(ValueError, match="cannot delegate to yourself"):
+            apply(state, DelegateTurn("p1"))
+
+    def test_delegate_without_scrum_master_raises(self) -> None:
+        players = (Player(id="p1", role_id="pm"), Player(id="p2", role_id="designer"))
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            pending_roll=3,
+        )
+        with pytest.raises(ValueError, match="does not hold Scrum Master"):
+            apply(state, DelegateTurn("p2"))
+
+
+class TestRoleSwap:
+    def _past_pmf_concept(self, card_id="concept_0"):
+        return _concept(card_id=card_id, quadrant="scaling", offset=1)
+
+    def test_not_offered_before_pmf(self) -> None:
+        state = _state(portfolio=[_concept(offset=0)], in_close_phase=True)  # discovery, order 1
+        assert not any(isinstance(a, RoleSwap) for a in legal_actions(state))
+
+    def test_offered_once_all_concepts_past_pmf(self) -> None:
+        players = (
+            Player(id="p1", role_id="pm"),
+            Player(id="p2", role_id="designer"),
+            Player(id="p3", role_id="engineer"),
+        )
+        state = _state(
+            portfolio=[self._past_pmf_concept("concept_0"), self._past_pmf_concept("concept_1")],
+            players=players,
+            in_close_phase=True,
+        )
+        swap_pairs = {
+            (a.player_a_id, a.player_b_id) for a in legal_actions(state) if isinstance(a, RoleSwap)
+        }
+        assert swap_pairs == {("p1", "p2"), ("p1", "p3"), ("p2", "p3")}
+
+    def test_using_swap_exchanges_roles_and_sets_used(self) -> None:
+        players = (Player(id="p1", role_id="pm"), Player(id="p2", role_id="designer"))
+        state = _state(portfolio=[self._past_pmf_concept()], players=players, in_close_phase=True)
+        result = apply(state, RoleSwap("p1", "p2"))
+        assert result.players[0].role_id == "designer"
+        assert result.players[1].role_id == "pm"
+        assert result.role_swap_used is True
+        assert result.in_close_phase is True  # stays in Close phase, doesn't end it
+
+    def test_unused_swap_forfeited_at_end_close_even_if_condition_persists(self) -> None:
+        players = (Player(id="p1", role_id="pm"), Player(id="p2", role_id="designer"))
+        state = _state(
+            portfolio=[self._past_pmf_concept()],
+            players=players,
+            active_player_index=0,
+            turn_owner_index=0,
+            in_close_phase=True,
+        )
+        result = apply(state, EndClose())
+        assert result.role_swap_forfeited is True
+        assert result.role_swap_used is False
+
+        # Next Close phase: the quadrant condition still holds, but it's gone for good.
+        next_close_state = _state(
+            portfolio=[self._past_pmf_concept()],
+            players=players,
+            in_close_phase=True,
+            role_swap_forfeited=True,
+        )
+        assert not any(isinstance(a, RoleSwap) for a in legal_actions(next_close_state))
+
+    def test_swap_unavailable_when_not_offered_raises(self) -> None:
+        state = _state(portfolio=[_concept(offset=0)], in_close_phase=True)  # not past PMF
+        with pytest.raises(ValueError, match="no role swap is available"):
+            apply(state, RoleSwap("p1", "p2"))

@@ -13,6 +13,7 @@ from engine.rules import (
     ChanceRemoveConcept,
     CrossMilestone,
     Decision,
+    DelegateTurn,
     DiscardSkill,
     DrawConcept,
     EndClose,
@@ -20,6 +21,7 @@ from engine.rules import (
     MoveConcept,
     Outcome,
     RemoveConcept,
+    RoleSwap,
     apply,
     is_over,
     legal_actions,
@@ -39,6 +41,7 @@ __all__ = [
     "ChanceRemoveConcept",
     "CrossMilestone",
     "Decision",
+    "DelegateTurn",
     "DiscardSkill",
     "DrawConcept",
     "EndClose",
@@ -47,6 +50,7 @@ __all__ = [
     "NewGameConfig",
     "Outcome",
     "RemoveConcept",
+    "RoleSwap",
     "apply",
     "current_decision",
     "is_over",
@@ -177,6 +181,13 @@ def observe(state: GameState, player_id: str) -> str:
         f"TAM bank: ${state.bank:.2f}B",
         "Portfolio:",
     ]
+    if state.active_player_index != state.turn_owner_index:
+        lines.append(
+            f"(Scrum Master: {state.turn_owner.id} delegated the rest of this turn "
+            f"to {state.active_player.id})"
+        )
+    if state.agile_bonus_pending:
+        lines.append(f"(Agile Methods: {state.turn_owner.id}'s bonus second cycle)")
     for c in state.portfolio:
         card = state.data.concepts[c.card_id]
         lines.append(
