@@ -62,3 +62,26 @@ which these aren't quite.
 **Provisional choice:** these will be plain Python constants in a later
 engine step, not YAML. Flagged here in case that turns out to be wrong once
 the core loop (build plan step 2) is underway.
+
+## 7. Loop overflow for a non-qualifying Concept (resolved)
+
+Rules §8.1.2 says a Concept always moves "the full amount rolled," with no
+exception for a move that would carry it past the last coded space. §9.3
+only describes what happens when a *qualifying* Concept crosses a
+Milestone (it stops on the next quadrant's Gateway, leftover movement
+lost) — it's silent on a non-qualifying Concept in the same situation.
+
+**Resolved with the user:** because the path is a loop, a non-qualifying
+Concept's move simply continues around it — the Gateway is a pass-through
+space (no draw) in that direction, exactly like any other quadrant it
+isn't currently exiting through. Concepts can move in either direction on
+any given roll, so a Concept can pass the Gateway before it qualifies, and
+change direction later to actually cross once it does qualify.
+
+Implemented in `engine/rules.py`: a move that would land at or past the
+Gateway (`raw >= 16` in the 16-slot loop model, offset 0 = Gateway) auto-
+wraps (`new_offset = raw % 16`) unless the Concept qualifies for the
+quadrant's Milestone, in which case it gets an explicit accept/decline
+`CrossMilestone` decision; declining also wraps. Backward movement past
+the Gateway (`raw <= 0`) always wraps — Milestones only connect quadrants
+forward, so backward crossing isn't a thing the rules describe.
