@@ -21,6 +21,7 @@ from engine.schema import (
     Milestone,
     Quadrant,
     Role,
+    Skill,
 )
 
 _SPACES = ["D", "V", "F", "skills", "chance"] * 3
@@ -106,6 +107,48 @@ def make_concepts(count: int = 6) -> dict[str, Concept]:
     }
 
 
+_ALL_ROLE_IDS = [rid for rid, _ in _ROLE_NAMES]
+
+
+def make_skills() -> dict[str, Skill]:
+    """A small synthetic Skill set: one role-restricted buff, one buff with
+    a medium filter, one all-roles buff, and the two special Skills (their
+    `special:` YAML shorthand only expands during YAML loading, so the
+    explicit `{type: special, handler: ...}` form is used here)."""
+    return {
+        "designer_buff": Skill(
+            id="designer_buff",
+            name="Designer Buff",
+            eligible_roles=["designer"],
+            effects=[{"type": "buff", "dim": "D", "n": 1}],
+        ),
+        "pm_digital_buff": Skill(
+            id="pm_digital_buff",
+            name="PM Digital Buff",
+            eligible_roles=["pm"],
+            effects=[{"type": "buff", "dim": "V", "n": 2, "filter": {"medium": "digital"}}],
+        ),
+        "all_roles_buff": Skill(
+            id="all_roles_buff",
+            name="All Roles Buff",
+            eligible_roles=list(_ALL_ROLE_IDS),
+            effects=[{"type": "buff", "dim": "F", "n": 1}],
+        ),
+        "agile_methods": Skill(
+            id="agile_methods",
+            name="Agile Methods",
+            eligible_roles=list(_ALL_ROLE_IDS),
+            effects=[{"type": "special", "handler": "agile_methods"}],
+        ),
+        "scrum_master": Skill(
+            id="scrum_master",
+            name="Scrum Master",
+            eligible_roles=list(_ALL_ROLE_IDS),
+            effects=[{"type": "special", "handler": "scrum_master"}],
+        ),
+    }
+
+
 _QUADRANT_IDS = ("discovery", "npd", "scaling", "market_maturity")
 
 
@@ -133,7 +176,7 @@ def make_game_data(
 ) -> GameData:
     return GameData(
         roles=make_roles(),
-        skills={},
+        skills=make_skills(),
         concepts=make_concepts(concept_count),
         chance_cards={},
         dvf_decks=dvf_decks if dvf_decks is not None else make_dvf_decks(),

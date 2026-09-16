@@ -10,8 +10,8 @@ the modifier list:
 
 from __future__ import annotations
 
-from engine.schema import Concept, ModifyRequirementEffect, Quadrant
-from engine.state import ConceptInstance, DVFTokens
+from engine.schema import Concept, ConceptFilter, ModifyRequirementEffect, Quadrant
+from engine.state import ConceptInstance, DVFTokens, GameState
 
 _DIMS = ("D", "V", "F")
 _ZERO_TOKENS = DVFTokens()
@@ -61,3 +61,30 @@ def qualifies(
     required = required_dvf(card, quadrant)
     have = instance.tokens + skill_buffs
     return have.D >= required.D and have.V >= required.V and have.F >= required.F
+
+
+def _filter_matches(concept_filter: ConceptFilter | None, card: Concept) -> bool:
+    if concept_filter is None:
+        return True
+    if concept_filter.medium is not None and concept_filter.medium != card.medium:
+        return False
+    if concept_filter.category is not None and concept_filter.category not in card.categories:
+        return False
+    return True
+
+
+def compute_skill_buffs(state: GameState, card: Concept) -> DVFTokens:
+    """Sum every player's held Skill's `buff` effects that match `card`.
+
+    rules.md sec 10: every buff from every player's Skill applies to all
+    qualifying Concepts, and all buffs stack.
+    """
+    total = DVFTokens()
+    for player in state.players:
+        if player.skill_id is None:
+            continue
+        skill = state.data.skills[player.skill_id]
+        for effect in skill.effects:
+            if effect.type == "buff" and _filter_matches(effect.filter, card):
+                total = total + DVFTokens(**{effect.dim: effect.n})
+    return total

@@ -53,6 +53,7 @@ class ConceptInstance:
 class Player:
     id: str
     role_id: str
+    skill_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,19 +81,36 @@ class GameState:
     data: GameData
     turn: int
     active_player_index: int
+    """Who's currently making decisions. Scrum Master's DelegateTurn can
+    reassign this mid-turn; see `turn_owner_index`."""
+    turn_owner_index: int
+    """Whose turn *slot* this is: drives rotation math and the Agile
+    Methods bonus-cycle check. Delegation never changes this, which is
+    what makes turn order snap back to the original holder afterward."""
     players: tuple[Player, ...]
     portfolio: tuple[ConceptInstance, ...]
     bank: float
     rng_state: tuple
     dvf_sub_decks: dict[tuple[str, str], Deck] = field(default_factory=dict)
     concept_deck: Deck = field(default_factory=lambda: Deck(draw_pile=()))
+    skill_deck: Deck = field(default_factory=lambda: Deck(draw_pile=()))
+    chance_deck: Deck = field(default_factory=lambda: Deck(draw_pile=()))
     in_close_phase: bool = False
+    agile_bonus_pending: bool = False
     pending_roll: int | None = None
     pending_cross: PendingCross | None = None
+    pending_skill: str | None = None
+    pending_chance_removal: bool = False
+    role_swap_used: bool = False
+    role_swap_forfeited: bool = False
 
     @property
     def active_player(self) -> Player:
         return self.players[self.active_player_index]
+
+    @property
+    def turn_owner(self) -> Player:
+        return self.players[self.turn_owner_index]
 
 
 def get_concept(state: GameState, concept_id: str) -> ConceptInstance:

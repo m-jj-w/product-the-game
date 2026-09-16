@@ -82,6 +82,78 @@ Implemented in `engine/rules.py`: a move that would land at or past the
 Gateway (`raw >= 16` in the 16-slot loop model, offset 0 = Gateway) auto-
 wraps (`new_offset = raw % 16`) unless the Concept qualifies for the
 quadrant's Milestone, in which case it gets an explicit accept/decline
+cross decision (declining also wraps). Backward movement past the
+Gateway always wraps and never offers crossing.
+
+## 8. Scrum Master: turn rotation after delegation (resolved)
+
+Rules §10 says the Scrum Master holder "may hand the rest of the turn to
+another player," but doesn't say what happens to turn order afterward:
+does the next turn continue from the delegate's seat, or return to the
+original holder's?
+
+**Resolved with the user:** rotation snaps back to the original holder's
+seat. Delegation only reassigns who's currently making decisions for the
+rest of this turn, not whose turn *slot* it is.
+
+Implemented via two separate fields on `GameState`: `turn_owner_index`
+(whose turn slot this is — drives rotation math and the Agile Methods
+bonus-cycle check) and `active_player_index` (who's currently deciding —
+what `DelegateTurn` reassigns). Every new Move phase (a real turn start,
+or an Agile Methods bonus cycle) resets `active_player_index` back to
+`turn_owner_index`, so each cycle starts with the owner back in control
+even if the previous cycle ended mid-delegation.
+
+## 9. "May take it" for an eligible Skill
+
+Rules §10 describes the ineligible-Skill branch with an explicit choice
+(discard and continue, or give to an eligible teammate). The eligible
+branch just says "the player may take it," with no stated alternative if
+they don't.
+
+**Provisional choice:** read as permissive ("they're allowed to," in
+contrast to the ineligible case where they aren't), not as an optional
+decision. Taking an eligible Skill is automatic — no decision point, no
+choice to decline and discard it instead.
+
+## 10. Agile Methods picked up mid-turn
+
+Rules §10 says Agile Methods "applies on every one of the holder's
+turns," but doesn't address a player who draws it partway through a turn
+that's already in progress.
+
+**Provisional choice:** the check happens at end-of-cycle time, against
+whichever Skill the holder currently has. If a player draws Agile
+Methods during what would otherwise be a normal turn, finishing that
+cycle immediately grants the bonus second cycle, same turn.
+
+## 11. Chained Scrum Master delegation
+
+If the Scrum Master holder delegates to a player who *also* holds Scrum
+Master, could that second player delegate again in the same turn slot?
+Rules §10's "once per turn" isn't explicit about whether it's scoped per
+holder or per turn.
+
+**Provisional choice:** allowed, not specially blocked. Each holder can
+use their own Scrum Master once while they're the one currently
+deciding; nothing in the rules prohibits a chain, and blocking it would
+require inventing a restriction the text doesn't state.
+
+## 12. Role swap: earn-once, use-it-or-lose-it
+
+Rules §3 says the team earns a role swap "when every active Concept has
+passed the Product Market Fit Milestone," used immediately in the Close
+phase that follows "or it is lost." It doesn't say what happens if the
+condition remains true on later turns too (all Concepts stay past PMF
+indefinitely once they cross it) — is a fresh swap earned every such
+Close phase, or is it truly a one-time-ever grant?
+
+**Provisional choice:** one-time-ever. `role_swap_used` and
+`role_swap_forfeited` are both permanent, one-way latches: the swap is
+offered the first Close phase the condition holds, and if not used by
+`end_close`, `role_swap_forfeited` permanently blocks it from coming
+back — even though the quadrant condition will typically stay true for
+the rest of the game.
 `CrossMilestone` decision; declining also wraps. Backward movement past
 the Gateway (`raw <= 0`) always wraps — Milestones only connect quadrants
 forward, so backward crossing isn't a thing the rules describe.

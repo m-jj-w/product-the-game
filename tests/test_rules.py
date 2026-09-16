@@ -7,8 +7,10 @@ import pytest
 from engine.engine import NewGameConfig, new_game
 from engine.rules import (
     CrossMilestone,
+    DiscardSkill,
     DrawConcept,
     EndClose,
+    GiveSkill,
     MoveConcept,
     RemoveConcept,
     apply,
@@ -43,32 +45,44 @@ def _concept(card_id="concept_0", quadrant="discovery", offset=0, tokens=None):
     )
 
 
+_DEFAULT_PLAYERS = (Player(id="p1", role_id="pm"), Player(id="p2", role_id="designer"))
+
+
 def _state(
     *,
     portfolio,
     turn=0,
     active_player_index=0,
+    turn_owner_index=None,
+    players=None,
     bank=0.0,
     pending_roll=None,
     pending_cross=None,
     dvf_sub_decks=None,
     concept_deck=None,
+    skill_deck=None,
     in_close_phase=False,
+    agile_bonus_pending=False,
+    pending_skill=None,
     rng_seed=0,
 ) -> GameState:
     return GameState(
         data=DATA,
         turn=turn,
         active_player_index=active_player_index,
-        players=(Player(id="p1", role_id="pm"), Player(id="p2", role_id="designer")),
+        turn_owner_index=turn_owner_index if turn_owner_index is not None else active_player_index,
+        players=players if players is not None else _DEFAULT_PLAYERS,
         portfolio=tuple(portfolio),
         bank=bank,
         rng_state=random.Random(rng_seed).getstate(),
         dvf_sub_decks=dvf_sub_decks if dvf_sub_decks is not None else _INITIAL_SUB_DECKS,
         concept_deck=concept_deck if concept_deck is not None else Deck(draw_pile=()),
+        skill_deck=skill_deck if skill_deck is not None else Deck(draw_pile=()),
         in_close_phase=in_close_phase,
+        agile_bonus_pending=agile_bonus_pending,
         pending_roll=pending_roll,
         pending_cross=pending_cross,
+        pending_skill=pending_skill,
     )
 
 
@@ -121,16 +135,16 @@ class TestCrossing:
         }
 
     def test_decline_cross_wraps_and_keeps_tokens(self) -> None:
-        # offset 4 is a "skills" space in the fixture board -- no draw, so
-        # this test stays focused on crossing-decline semantics rather than
-        # DVF drawing (covered separately in TestDvfDraws below).
+        # offset 0 is the Gateway -- guaranteed no draw of any kind, so this
+        # test stays focused on crossing-decline semantics rather than DVF
+        # or Skill drawing (covered separately in TestDvfDraws/TestSkills).
         state = _state(
             portfolio=[_concept(offset=12, tokens=DVFTokens(D=3, V=2, F=1))],
-            pending_cross=PendingCross("concept_0", same_quadrant_offset=4, next_quadrant_id="npd"),
+            pending_cross=PendingCross("concept_0", same_quadrant_offset=0, next_quadrant_id="npd"),
         )
         result = apply(state, CrossMilestone("concept_0", cross=False))
         c = result.portfolio[0]
-        assert c.position == BoardPosition("discovery", 4)
+        assert c.position == BoardPosition("discovery", 0)
         assert c.tokens == DVFTokens(D=3, V=2, F=1)
         assert result.pending_cross is None
         assert result.in_close_phase is True
@@ -368,3 +382,113 @@ class TestClosePhase:
             apply(state, EndClose())
         with pytest.raises(ValueError, match="not in the Close phase"):
             apply(state, DrawConcept())
+
+
+class TestSkills:
+    """offset 0 + roll 4 always lands on a 'skills' space (offset 4) in the
+    fixture board's [D,V,F,skills,chance]x3 pattern."""
+
+    def test_eligible_skill_auto_taken_replaces_old(self) -> None:
+        players = (
+            Player(id="p1", role_id="designer", skill_id="all_roles_buff"),
+            Player(id="p2", role_id="pm"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            pending_roll=4,
+            skill_deck=Deck(draw_pile=("designer_buff",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.players[0].skill_id == "designer_buff"
+        assert result.skill_deck.draw_pile == ()
+        assert result.skill_deck.discard_pile == ("all_roles_buff",)  # old skill discarded
+        assert result.pending_skill is None
+        assert result.in_close_phase is True  # no decision needed, proceeds normally
+
+    def test_ineligible_skill_pauses_with_only_discard_when_nobody_eligible(self) -> None:
+        players = (
+            Player(id="p1", role_id="engineer"),
+            Player(id="p2", role_id="pm"),  # neither eligible for designer_buff
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            pending_roll=4,
+            skill_deck=Deck(draw_pile=("designer_buff",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.pending_skill == "designer_buff"
+        assert result.in_close_phase is False
+        assert result.turn == 0
+        assert legal_actions(result) == [DiscardSkill()]
+
+    def test_ineligible_skill_offers_give_to_eligible_teammate(self) -> None:
+        players = (
+            Player(id="p1", role_id="engineer"),
+            Player(id="p2", role_id="designer"),  # eligible for designer_buff
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            pending_roll=4,
+            skill_deck=Deck(draw_pile=("designer_buff",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert set(legal_actions(result)) == {DiscardSkill(), GiveSkill("p2")}
+
+    def test_give_skill_ends_turn_with_no_close_phase(self) -> None:
+        players = (
+            Player(id="p1", role_id="engineer"),
+            Player(id="p2", role_id="designer"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            turn=2,
+            pending_roll=4,
+            skill_deck=Deck(draw_pile=("designer_buff",)),
+        )
+        state = apply(state, MoveConcept("concept_0", "forward"))
+        result = apply(state, GiveSkill("p2"))
+        assert result.players[1].skill_id == "designer_buff"
+        assert result.pending_skill is None
+        assert result.in_close_phase is False  # never entered
+        assert result.turn == 3  # ended immediately via _end_turn
+        assert result.active_player_index == 1
+
+    def test_discard_skill_proceeds_to_close_phase(self) -> None:
+        players = (Player(id="p1", role_id="engineer"), Player(id="p2", role_id="pm"))
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            players=players,
+            active_player_index=0,
+            pending_roll=4,
+            skill_deck=Deck(draw_pile=("designer_buff",)),
+        )
+        state = apply(state, MoveConcept("concept_0", "forward"))
+        result = apply(state, DiscardSkill())
+        assert result.pending_skill is None
+        assert result.skill_deck.discard_pile == ("designer_buff",)
+        assert result.in_close_phase is True
+        assert result.players[0].skill_id is None  # never took it
+
+    def test_skill_buff_helps_concept_qualify_for_crossing(self) -> None:
+        # Discovery requires D3 V2 F1. The Concept has D2 (short by 1).
+        # p2's designer_buff (+1 D, unfiltered) closes the gap.
+        players = (
+            Player(id="p1", role_id="pm"),
+            Player(id="p2", role_id="designer", skill_id="designer_buff"),
+        )
+        state = _state(
+            portfolio=[_concept(offset=12, tokens=DVFTokens(D=2, V=2, F=1))],
+            players=players,
+            active_player_index=0,
+            pending_roll=6,
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.pending_cross is not None

@@ -1,10 +1,13 @@
 """legal_actions, apply, is_over — the core turn state machine.
 
-Skills and Chance spaces, and team role swaps, are still no-ops (step 5);
 D/V/F spaces draw from the landing Concept's current-quadrant sub-deck and
-apply the card via engine/effects.py. After Move+Draw resolves, the team
-(PM) may remove/draw Concepts any number of times in the Close phase
-before the turn actually ends (rules.md sec 8.3).
+apply the card via engine/effects.py. Skills spaces draw for the active
+player: an eligible Skill is taken automatically, an ineligible one pauses
+for a discard/give decision (rules.md sec 10). Chance spaces and the
+special handlers (Agile Methods, Scrum Master, role swaps) are still
+no-ops (step 5, phases 2-3). After Move+Draw resolves, the team (PM) may
+remove/draw Concepts any number of times in the Close phase before the
+turn actually ends (rules.md sec 8.3).
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from engine.effects import apply_effects
-from engine.modifiers import qualifies
+from engine.modifiers import compute_skill_buffs, qualifies
 from engine.schema import Quadrant
 from engine.state import (
     BoardPosition,
@@ -61,12 +64,24 @@ class EndClose:
     pass
 
 
-Action = MoveConcept | CrossMilestone | RemoveConcept | DrawConcept | EndClose
+@dataclass(frozen=True)
+class DiscardSkill:
+    pass
+
+
+@dataclass(frozen=True)
+class GiveSkill:
+    recipient_id: str
+
+
+Action = (
+    MoveConcept | CrossMilestone | RemoveConcept | DrawConcept | EndClose | DiscardSkill | GiveSkill
+)
 
 
 @dataclass(frozen=True)
 class Decision:
-    kind: Literal["move", "cross_milestone", "close"]
+    kind: Literal["move", "cross_milestone", "close", "skill"]
     owner: str
     actions: tuple[Action, ...]
 
@@ -104,6 +119,16 @@ def legal_actions(state: GameState) -> list[Action]:
     if state.pending_cross is not None:
         concept_id = state.pending_cross.concept_id
         return [CrossMilestone(concept_id, True), CrossMilestone(concept_id, False)]
+    if state.pending_skill is not None:
+        skill = state.data.skills[state.pending_skill]
+        active_id = state.active_player.id
+        actions: list[Action] = [DiscardSkill()]
+        actions.extend(
+            GiveSkill(p.id)
+            for p in state.players
+            if p.id != active_id and p.role_id in skill.eligible_roles
+        )
+        return actions
     if state.in_close_phase:
         actions: list[Action] = []
         if len(state.portfolio) > 1:
@@ -190,6 +215,44 @@ def _draw_and_apply(state: GameState, concept_id: str, quadrant_id: str, dim: st
     return apply_effects(state, concept_id, card.effects)
 
 
+def _give_skill_to_player(state: GameState, player_id: str, skill_id: str) -> GameState:
+    """Set `skill_id` as `player_id`'s held Skill. A permanent Skill they
+    already hold (if any) goes to the discard pile (rules.md sec 10)."""
+    players = list(state.players)
+    idx = next(i for i, p in enumerate(players) if p.id == player_id)
+    old_skill_id = players[idx].skill_id
+    players[idx] = dataclasses.replace(players[idx], skill_id=skill_id)
+
+    skill_deck = state.skill_deck
+    if old_skill_id is not None:
+        skill_deck = dataclasses.replace(
+            skill_deck, discard_pile=skill_deck.discard_pile + (old_skill_id,)
+        )
+    return dataclasses.replace(state, players=tuple(players), skill_deck=skill_deck)
+
+
+def _draw_skill_and_resolve(state: GameState) -> GameState:
+    """The active player draws a Skill card (rules.md sec 10).
+
+    Eligible: taking it is automatic (see rules/open-questions.md #9).
+    Ineligible: pauses for a discard-or-give decision -- doesn't enter
+    Close phase yet (`_enter_close_phase` checks `pending_skill`).
+    """
+    try:
+        card_id, new_deck, new_rng_state = _draw_from_deck(state.skill_deck, state.rng_state)
+    except ValueError as exc:
+        raise ValueError(
+            "no Skill cards defined at all (data/skills.yaml has none) "
+            "-- see rules/open-questions.md"
+        ) from exc
+    state = dataclasses.replace(state, skill_deck=new_deck, rng_state=new_rng_state)
+
+    skill = state.data.skills[card_id]
+    if state.active_player.role_id in skill.eligible_roles:
+        return _give_skill_to_player(state, state.active_player.id, card_id)
+    return dataclasses.replace(state, pending_skill=card_id)
+
+
 def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> GameState:
     """Land a Concept at `new_offset` in its current quadrant, then trigger
     whatever's there. Offset 0 is the Gateway: no draw, ever (rules.md sec 4)."""
@@ -203,8 +266,10 @@ def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> Ga
 
     quadrant = _quadrant_by_id(state, quadrant_id)
     space_type = quadrant.spaces[new_offset - 1]
+    if space_type == "skills":
+        return _draw_skill_and_resolve(state)
     if space_type not in ("D", "V", "F"):
-        return state  # skills/chance: step 5
+        return state  # chance: phase 2 of this step
 
     return _draw_and_apply(state, concept_id, quadrant_id, space_type)
 
@@ -212,8 +277,11 @@ def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> Ga
 def _enter_close_phase(state: GameState) -> GameState:
     """Move+Draw is done for this turn. Every turn gets a Close phase
     (rules.md sec 8.3), regardless of what happened during Move/Draw --
-    unless the game just ended (e.g. Finish completed the bank)."""
+    unless the game just ended (e.g. Finish completed the bank), or an
+    ineligible drawn Skill is still awaiting a discard/give decision."""
     if is_over(state) is not None:
+        return state
+    if state.pending_skill is not None:
         return state
     return dataclasses.replace(state, in_close_phase=True)
 
@@ -231,12 +299,48 @@ def apply(state: GameState, action: Action) -> GameState:
         return _apply_draw_concept(state)
     if isinstance(action, EndClose):
         return _apply_end_close(state)
+    if isinstance(action, DiscardSkill):
+        return _apply_discard_skill(state)
+    if isinstance(action, GiveSkill):
+        return _apply_give_skill(state, action)
     raise TypeError(f"unknown action type: {type(action)!r}")
 
 
 def _require_close_phase(state: GameState) -> None:
     if not state.in_close_phase:
         raise ValueError("not in the Close phase")
+
+
+def _require_pending_skill(state: GameState) -> str:
+    if state.pending_skill is None:
+        raise ValueError("no pending Skill decision")
+    return state.pending_skill
+
+
+def _apply_discard_skill(state: GameState) -> GameState:
+    skill_id = _require_pending_skill(state)
+    new_deck = dataclasses.replace(
+        state.skill_deck, discard_pile=state.skill_deck.discard_pile + (skill_id,)
+    )
+    state = dataclasses.replace(state, skill_deck=new_deck, pending_skill=None)
+    return _enter_close_phase(state)
+
+
+def _apply_give_skill(state: GameState, action: GiveSkill) -> GameState:
+    skill_id = _require_pending_skill(state)
+    if action.recipient_id == state.active_player.id:
+        raise ValueError("cannot give a Skill to yourself")
+    recipient = next((p for p in state.players if p.id == action.recipient_id), None)
+    if recipient is None:
+        raise KeyError(f"no player '{action.recipient_id}'")
+    skill = state.data.skills[skill_id]
+    if recipient.role_id not in skill.eligible_roles:
+        raise ValueError(f"'{action.recipient_id}' is not eligible for this Skill")
+
+    state = _give_skill_to_player(state, action.recipient_id, skill_id)
+    state = dataclasses.replace(state, pending_skill=None)
+    # rules.md sec 10: the active player's turn ends immediately, no Close phase.
+    return _end_turn(state)
 
 
 def _apply_remove_concept(state: GameState, action: RemoveConcept) -> GameState:
@@ -291,7 +395,7 @@ def _apply_move(state: GameState, action: MoveConcept) -> GameState:
     raw = offset + n if action.direction == "forward" else offset - n
     reaches_gateway = action.direction == "forward" and raw >= LOOP_SIZE
 
-    if reaches_gateway and qualifies(instance, card, quadrant):
+    if reaches_gateway and qualifies(instance, card, quadrant, compute_skill_buffs(state, card)):
         milestone = quadrant.milestone
         next_quadrant_id = None if milestone.leads_to == "finish" else milestone.leads_to
         pending = PendingCross(

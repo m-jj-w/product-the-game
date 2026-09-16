@@ -22,6 +22,7 @@ def _state(tokens: DVFTokens | None = None) -> GameState:
         data=DATA,
         turn=0,
         active_player_index=0,
+        turn_owner_index=0,
         players=(Player(id="p1", role_id="pm"),),
         portfolio=(concept,),
         bank=0.0,

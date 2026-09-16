@@ -12,8 +12,10 @@ from engine.rules import (
     Action,
     CrossMilestone,
     Decision,
+    DiscardSkill,
     DrawConcept,
     EndClose,
+    GiveSkill,
     MoveConcept,
     Outcome,
     RemoveConcept,
@@ -35,8 +37,10 @@ __all__ = [
     "Action",
     "CrossMilestone",
     "Decision",
+    "DiscardSkill",
     "DrawConcept",
     "EndClose",
+    "GiveSkill",
     "MoveConcept",
     "NewGameConfig",
     "Outcome",
@@ -100,21 +104,30 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
     concept_deck = Deck(draw_pile=tuple(remaining_ids))
 
     sub_decks = _build_initial_sub_decks(config.data, rng)
+    skill_deck = _build_shuffled_deck(config.data.skills, rng)
     roll = rng.randint(1, 6)
 
     return GameState(
         data=config.data,
         turn=0,
         active_player_index=active_player_index,
+        turn_owner_index=active_player_index,
         players=players,
         portfolio=portfolio,
         bank=0.0,
         rng_state=rng.getstate(),
         dvf_sub_decks=sub_decks,
         concept_deck=concept_deck,
+        skill_deck=skill_deck,
         pending_roll=roll,
         pending_cross=None,
     )
+
+
+def _build_shuffled_deck(card_ids: dict[str, object], rng: random.Random) -> Deck:
+    ids = list(card_ids)
+    rng.shuffle(ids)
+    return Deck(draw_pile=tuple(ids))
 
 
 def _build_initial_sub_decks(data: GameData, rng: random.Random) -> dict[tuple[str, str], Deck]:
@@ -138,6 +151,8 @@ def current_decision(state: GameState) -> Decision | None:
         return None
     if state.pending_cross is not None:
         kind, owner = "cross_milestone", state.active_player.id
+    elif state.pending_skill is not None:
+        kind, owner = "skill", state.active_player.id
     elif state.in_close_phase:
         kind = "close"
         owner = next(p.id for p in state.players if p.role_id == "pm")
@@ -161,8 +176,18 @@ def observe(state: GameState, player_id: str) -> str:
             f"  {card.name} [{c.card_id}] -- {c.position.quadrant_id} "
             f"offset {c.position.offset} -- tokens D{c.tokens.D} V{c.tokens.V} F{c.tokens.F}"
         )
+    lines.append(
+        "Players: "
+        + ", ".join(f"{p.id} ({p.role_id}, skill={p.skill_id or 'none'})" for p in state.players)
+    )
     if state.pending_cross is not None:
         lines.append(f"Pending: cross-milestone decision for '{state.pending_cross.concept_id}'")
+    elif state.pending_skill is not None:
+        skill = state.data.skills[state.pending_skill]
+        lines.append(
+            f"Pending: {state.active_player.id} drew '{skill.name}', "
+            f"not eligible ({state.active_player.role_id}) -- discard or give it away"
+        )
     elif state.in_close_phase:
         deck = state.concept_deck
         lines.append(

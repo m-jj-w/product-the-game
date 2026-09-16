@@ -94,6 +94,7 @@ class TestClosePhaseDecisionOwnership:
             data=data,
             turn=0,
             active_player_index=0,  # alice is the active player this turn...
+            turn_owner_index=0,
             players=players,
             portfolio=(
                 ConceptInstance(card_id="concept_0", position=BoardPosition("discovery", 0)),
