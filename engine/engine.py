@@ -19,7 +19,7 @@ from engine.rules import (
     legal_actions,
 )
 from engine.schema import GameData
-from engine.state import BoardPosition, ConceptInstance, DVFTokens, GameState, Player
+from engine.state import BoardPosition, ConceptInstance, DVFTokens, GameState, Player, SubDeck
 
 __all__ = [
     "Action",
@@ -87,6 +87,7 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
         for cid in concept_ids[:STARTING_PORTFOLIO_SIZE]
     )
 
+    sub_decks = _build_initial_sub_decks(config.data, rng)
     roll = rng.randint(1, 6)
 
     return GameState(
@@ -97,9 +98,22 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
         portfolio=portfolio,
         bank=0.0,
         rng_state=rng.getstate(),
+        dvf_sub_decks=sub_decks,
         pending_roll=roll,
         pending_cross=None,
     )
+
+
+def _build_initial_sub_decks(data: GameData, rng: random.Random) -> dict[tuple[str, str], SubDeck]:
+    sub_decks: dict[tuple[str, str], SubDeck] = {}
+    for quadrant in data.board.quadrants:
+        deck = data.dvf_decks.get(quadrant.id)
+        cards = deck.cards if deck is not None else []
+        for dim in ("D", "V", "F"):
+            card_ids = [c.id for c in cards if c.dim == dim]
+            rng.shuffle(card_ids)
+            sub_decks[(quadrant.id, dim)] = SubDeck(draw_pile=tuple(card_ids))
+    return sub_decks
 
 
 def current_decision(state: GameState) -> Decision | None:

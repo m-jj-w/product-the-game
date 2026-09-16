@@ -11,7 +11,17 @@ card content.
 
 from __future__ import annotations
 
-from engine.schema import Board, Concept, DVFRequirement, GameData, Milestone, Quadrant, Role
+from engine.schema import (
+    Board,
+    Concept,
+    DvfCard,
+    DvfDeck,
+    DVFRequirement,
+    GameData,
+    Milestone,
+    Quadrant,
+    Role,
+)
 
 _SPACES = ["D", "V", "F", "skills", "chance"] * 3
 
@@ -96,12 +106,36 @@ def make_concepts(count: int = 6) -> dict[str, Concept]:
     }
 
 
-def make_game_data(*, concept_count: int = 6) -> GameData:
+_QUADRANT_IDS = ("discovery", "npd", "scaling", "market_maturity")
+
+
+def make_dvf_decks(*, cards_per_dim: int = 2) -> dict[str, DvfDeck]:
+    """2 generic add_tokens cards per (quadrant, dim) -- enough to exercise
+    real draw/discard/reshuffle mechanics without inventing rules content."""
+    decks: dict[str, DvfDeck] = {}
+    for quadrant_id in _QUADRANT_IDS:
+        cards = [
+            DvfCard(
+                id=f"{quadrant_id}_{dim}_{i}",
+                name=f"{quadrant_id} {dim} card {i}",
+                dim=dim,
+                effects=[{"type": "add_tokens", "dim": dim, "n": 1}],
+            )
+            for dim in ("D", "V", "F")
+            for i in range(cards_per_dim)
+        ]
+        decks[quadrant_id] = DvfDeck(quadrant=quadrant_id, cards=cards)
+    return decks
+
+
+def make_game_data(
+    *, concept_count: int = 6, dvf_decks: dict[str, DvfDeck] | None = None
+) -> GameData:
     return GameData(
         roles=make_roles(),
         skills={},
         concepts=make_concepts(concept_count),
         chance_cards={},
-        dvf_decks={},
+        dvf_decks=dvf_decks if dvf_decks is not None else make_dvf_decks(),
         board=make_board(),
     )

@@ -58,3 +58,13 @@ class TestNewGameSetup:
         data = load_game_data(REAL_DATA_DIR)
         with pytest.raises(ValueError, match="concepts"):
             new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+
+    def test_builds_all_twelve_dvf_sub_decks(self) -> None:
+        data = make_game_data()
+        state = new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+        assert len(state.dvf_sub_decks) == 12
+        for quadrant_id in ("discovery", "npd", "scaling", "market_maturity"):
+            for dim in ("D", "V", "F"):
+                deck = state.dvf_sub_decks[(quadrant_id, dim)]
+                assert len(deck.draw_pile) == 2  # fixtures.make_dvf_decks' cards_per_dim default
+                assert deck.discard_pile == ()

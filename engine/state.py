@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 from engine.schema import GameData
@@ -64,6 +65,15 @@ class PendingCross:
 
 
 @dataclass(frozen=True)
+class SubDeck:
+    """One (quadrant, dim) DVF sub-deck. Cards move straight to discard when
+    drawn; the next draw after the pile empties reshuffles the discard."""
+
+    draw_pile: tuple[str, ...]
+    discard_pile: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class GameState:
     data: GameData
     turn: int
@@ -72,9 +82,24 @@ class GameState:
     portfolio: tuple[ConceptInstance, ...]
     bank: float
     rng_state: tuple
+    dvf_sub_decks: dict[tuple[str, str], SubDeck] = field(default_factory=dict)
     pending_roll: int | None = None
     pending_cross: PendingCross | None = None
 
     @property
     def active_player(self) -> Player:
         return self.players[self.active_player_index]
+
+
+def get_concept(state: GameState, concept_id: str) -> ConceptInstance:
+    for c in state.portfolio:
+        if c.card_id == concept_id:
+            return c
+    raise KeyError(f"no active concept '{concept_id}'")
+
+
+def with_concept(state: GameState, new_instance: ConceptInstance) -> GameState:
+    new_portfolio = tuple(
+        new_instance if c.card_id == new_instance.card_id else c for c in state.portfolio
+    )
+    return dataclasses.replace(state, portfolio=new_portfolio)
