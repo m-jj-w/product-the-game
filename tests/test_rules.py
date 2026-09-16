@@ -6,6 +6,7 @@ import pytest
 
 from engine.engine import NewGameConfig, new_game
 from engine.rules import (
+    ChanceRemoveConcept,
     CrossMilestone,
     DiscardSkill,
     DrawConcept,
@@ -61,9 +62,11 @@ def _state(
     dvf_sub_decks=None,
     concept_deck=None,
     skill_deck=None,
+    chance_deck=None,
     in_close_phase=False,
     agile_bonus_pending=False,
     pending_skill=None,
+    pending_chance_removal=False,
     rng_seed=0,
 ) -> GameState:
     return GameState(
@@ -78,11 +81,13 @@ def _state(
         dvf_sub_decks=dvf_sub_decks if dvf_sub_decks is not None else _INITIAL_SUB_DECKS,
         concept_deck=concept_deck if concept_deck is not None else Deck(draw_pile=()),
         skill_deck=skill_deck if skill_deck is not None else Deck(draw_pile=()),
+        chance_deck=chance_deck if chance_deck is not None else Deck(draw_pile=()),
         in_close_phase=in_close_phase,
         agile_bonus_pending=agile_bonus_pending,
         pending_roll=pending_roll,
         pending_cross=pending_cross,
         pending_skill=pending_skill,
+        pending_chance_removal=pending_chance_removal,
     )
 
 
@@ -492,3 +497,71 @@ class TestSkills:
         )
         result = apply(state, MoveConcept("concept_0", "forward"))
         assert result.pending_cross is not None
+
+
+class TestChance:
+    """offset 0 + roll 5 always lands on a 'chance' space (offset 5)."""
+
+    def test_plain_chance_effect_applies_to_landing_concept(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_bonus",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        c = result.portfolio[0]
+        assert c.position == BoardPosition("discovery", 5)
+        assert c.tokens.D == 1
+        assert result.chance_deck == Deck(draw_pile=(), discard_pile=("test_bonus",))
+        assert result.pending_chance_removal is False
+        assert result.in_close_phase is True
+
+    def test_removal_chance_pauses_for_team_decision(self) -> None:
+        state = _state(
+            portfolio=[
+                _concept(card_id="concept_0", offset=0),
+                _concept(card_id="concept_1", offset=3),
+            ],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_removal",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.pending_chance_removal is True
+        assert result.in_close_phase is False
+        assert result.turn == 0
+        # the card itself is used up immediately, regardless of the pending target choice
+        assert result.chance_deck == Deck(draw_pile=(), discard_pile=("test_removal",))
+        assert set(legal_actions(result)) == {
+            ChanceRemoveConcept("concept_0"),
+            ChanceRemoveConcept("concept_1"),
+        }
+
+    def test_removal_down_to_zero_ends_game_as_loss_without_close_phase(self) -> None:
+        state = _state(portfolio=[_concept(offset=0)], pending_chance_removal=True)
+        result = apply(state, ChanceRemoveConcept("concept_0"))
+        assert not result.portfolio
+        outcome = is_over(result)
+        assert outcome is not None and outcome.result == "loss"
+        assert result.in_close_phase is False
+        assert result.pending_chance_removal is False
+
+    def test_removal_with_others_remaining_proceeds_to_close_phase(self) -> None:
+        state = _state(
+            portfolio=[
+                _concept(card_id="concept_0", offset=0),
+                _concept(card_id="concept_1", offset=3),
+            ],
+            pending_chance_removal=True,
+        )
+        result = apply(state, ChanceRemoveConcept("concept_0"))
+        assert {c.card_id for c in result.portfolio} == {"concept_1"}
+        assert result.concept_deck.discard_pile == ("concept_0",)
+        assert result.in_close_phase is True
+        assert result.pending_chance_removal is False
+
+    def test_drawing_from_empty_chance_deck_raises_clear_error(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)], pending_roll=5, chance_deck=Deck(draw_pile=())
+        )
+        with pytest.raises(ValueError, match="no Chance cards defined"):
+            apply(state, MoveConcept("concept_0", "forward"))

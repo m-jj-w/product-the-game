@@ -3,11 +3,13 @@
 D/V/F spaces draw from the landing Concept's current-quadrant sub-deck and
 apply the card via engine/effects.py. Skills spaces draw for the active
 player: an eligible Skill is taken automatically, an ineligible one pauses
-for a discard/give decision (rules.md sec 10). Chance spaces and the
-special handlers (Agile Methods, Scrum Master, role swaps) are still
-no-ops (step 5, phases 2-3). After Move+Draw resolves, the team (PM) may
-remove/draw Concepts any number of times in the Close phase before the
-turn actually ends (rules.md sec 8.3).
+for a discard/give decision (rules.md sec 10). Chance spaces draw a Chance
+card and apply it to the landing Concept -- except a remove_concept effect
+(the schema only allows `chooser: "team"`), which pauses for the team's
+target choice instead. The special handlers (Agile Methods, Scrum Master,
+role swaps) are still no-ops (step 5, phase 3). After Move+Draw resolves,
+the team (PM) may remove/draw Concepts any number of times in the Close
+phase before the turn actually ends (rules.md sec 8.3).
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Literal
 
 from engine.effects import apply_effects
 from engine.modifiers import compute_skill_buffs, qualifies
-from engine.schema import Quadrant
+from engine.schema import ChanceCard, Quadrant
 from engine.state import (
     BoardPosition,
     ConceptInstance,
@@ -74,14 +76,26 @@ class GiveSkill:
     recipient_id: str
 
 
+@dataclass(frozen=True)
+class ChanceRemoveConcept:
+    concept_id: str
+
+
 Action = (
-    MoveConcept | CrossMilestone | RemoveConcept | DrawConcept | EndClose | DiscardSkill | GiveSkill
+    MoveConcept
+    | CrossMilestone
+    | RemoveConcept
+    | DrawConcept
+    | EndClose
+    | DiscardSkill
+    | GiveSkill
+    | ChanceRemoveConcept
 )
 
 
 @dataclass(frozen=True)
 class Decision:
-    kind: Literal["move", "cross_milestone", "close", "skill"]
+    kind: Literal["move", "cross_milestone", "close", "skill", "chance_removal"]
     owner: str
     actions: tuple[Action, ...]
 
@@ -129,6 +143,8 @@ def legal_actions(state: GameState) -> list[Action]:
             if p.id != active_id and p.role_id in skill.eligible_roles
         )
         return actions
+    if state.pending_chance_removal:
+        return [ChanceRemoveConcept(c.card_id) for c in state.portfolio]
     if state.in_close_phase:
         actions: list[Action] = []
         if len(state.portfolio) > 1:
@@ -253,6 +269,32 @@ def _draw_skill_and_resolve(state: GameState) -> GameState:
     return dataclasses.replace(state, pending_skill=card_id)
 
 
+def _draw_chance_card(state: GameState) -> tuple[ChanceCard, GameState]:
+    """Draw a Chance card. The card itself is used up and discarded
+    immediately (like a DVF card) regardless of what its effect needs --
+    only the effect's *target* might still need a decision."""
+    try:
+        card_id, new_deck, new_rng_state = _draw_from_deck(state.chance_deck, state.rng_state)
+    except ValueError as exc:
+        raise ValueError(
+            "no Chance cards defined at all (data/chance.yaml has none) "
+            "-- see rules/open-questions.md"
+        ) from exc
+    new_deck = dataclasses.replace(new_deck, discard_pile=new_deck.discard_pile + (card_id,))
+    state = dataclasses.replace(state, chance_deck=new_deck, rng_state=new_rng_state)
+    return state.data.chance_cards[card_id], state
+
+
+def _resolve_chance_card(state: GameState, concept_id: str, card: ChanceCard) -> GameState:
+    """rules.md sec 8.2: a Chance card affects the landing Concept unless
+    it says otherwise. `remove_concept` always says otherwise -- the
+    schema only allows `chooser: "team"`, so it always pauses for the
+    team's choice of target instead of a direct apply."""
+    if any(effect.type == "remove_concept" for effect in card.effects):
+        return dataclasses.replace(state, pending_chance_removal=True)
+    return apply_effects(state, concept_id, card.effects)
+
+
 def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> GameState:
     """Land a Concept at `new_offset` in its current quadrant, then trigger
     whatever's there. Offset 0 is the Gateway: no draw, ever (rules.md sec 4)."""
@@ -268,8 +310,11 @@ def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> Ga
     space_type = quadrant.spaces[new_offset - 1]
     if space_type == "skills":
         return _draw_skill_and_resolve(state)
+    if space_type == "chance":
+        card, state = _draw_chance_card(state)
+        return _resolve_chance_card(state, concept_id, card)
     if space_type not in ("D", "V", "F"):
-        return state  # chance: phase 2 of this step
+        return state
 
     return _draw_and_apply(state, concept_id, quadrant_id, space_type)
 
@@ -277,11 +322,14 @@ def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> Ga
 def _enter_close_phase(state: GameState) -> GameState:
     """Move+Draw is done for this turn. Every turn gets a Close phase
     (rules.md sec 8.3), regardless of what happened during Move/Draw --
-    unless the game just ended (e.g. Finish completed the bank), or an
-    ineligible drawn Skill is still awaiting a discard/give decision."""
+    unless the game just ended (e.g. Finish completed the bank), an
+    ineligible drawn Skill is awaiting a discard/give decision, or a
+    Chance card is awaiting the team's removal target."""
     if is_over(state) is not None:
         return state
     if state.pending_skill is not None:
+        return state
+    if state.pending_chance_removal:
         return state
     return dataclasses.replace(state, in_close_phase=True)
 
@@ -303,7 +351,26 @@ def apply(state: GameState, action: Action) -> GameState:
         return _apply_discard_skill(state)
     if isinstance(action, GiveSkill):
         return _apply_give_skill(state, action)
+    if isinstance(action, ChanceRemoveConcept):
+        return _apply_chance_remove_concept(state, action)
     raise TypeError(f"unknown action type: {type(action)!r}")
+
+
+def _apply_chance_remove_concept(state: GameState, action: ChanceRemoveConcept) -> GameState:
+    if not state.pending_chance_removal:
+        raise ValueError("no pending Chance removal decision")
+    instance = get_concept(state, action.concept_id)
+    new_portfolio = tuple(c for c in state.portfolio if c.card_id != instance.card_id)
+    new_deck = dataclasses.replace(
+        state.concept_deck, discard_pile=state.concept_deck.discard_pile + (instance.card_id,)
+    )
+    state = dataclasses.replace(
+        state, portfolio=new_portfolio, concept_deck=new_deck, pending_chance_removal=False
+    )
+    # No minimum-1 floor here (unlike Close-phase RemoveConcept): rules.md
+    # sec 2 explicitly allows Budget Cuts to remove the last Concept and
+    # end the game -- _enter_close_phase's is_over check handles that.
+    return _enter_close_phase(state)
 
 
 def _require_close_phase(state: GameState) -> None:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from engine.schema import (
     Board,
+    ChanceCard,
     Concept,
     DvfCard,
     DvfDeck,
@@ -171,6 +172,23 @@ def make_dvf_decks(*, cards_per_dim: int = 2) -> dict[str, DvfDeck]:
     return decks
 
 
+def make_chance_cards() -> dict[str, ChanceCard]:
+    """One plain effect (direct-apply path) and one team-choice removal
+    (Budget Cuts' shape -- the only kind rules.md's example data has)."""
+    return {
+        "test_bonus": ChanceCard(
+            id="test_bonus",
+            name="Test Bonus",
+            effects=[{"type": "add_tokens", "dim": "D", "n": 1}],
+        ),
+        "test_removal": ChanceCard(
+            id="test_removal",
+            name="Test Removal",
+            effects=[{"type": "remove_concept", "chooser": "team"}],
+        ),
+    }
+
+
 def make_game_data(
     *, concept_count: int = 6, dvf_decks: dict[str, DvfDeck] | None = None
 ) -> GameData:
@@ -178,7 +196,7 @@ def make_game_data(
         roles=make_roles(),
         skills=make_skills(),
         concepts=make_concepts(concept_count),
-        chance_cards={},
+        chance_cards=make_chance_cards(),
         dvf_decks=dvf_decks if dvf_decks is not None else make_dvf_decks(),
         board=make_board(),
     )

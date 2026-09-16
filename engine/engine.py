@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from engine.rules import (
     Action,
+    ChanceRemoveConcept,
     CrossMilestone,
     Decision,
     DiscardSkill,
@@ -35,6 +36,7 @@ from engine.state import (
 
 __all__ = [
     "Action",
+    "ChanceRemoveConcept",
     "CrossMilestone",
     "Decision",
     "DiscardSkill",
@@ -105,6 +107,7 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
 
     sub_decks = _build_initial_sub_decks(config.data, rng)
     skill_deck = _build_shuffled_deck(config.data.skills, rng)
+    chance_deck = _build_shuffled_deck(config.data.chance_cards, rng)
     roll = rng.randint(1, 6)
 
     return GameState(
@@ -119,6 +122,7 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
         dvf_sub_decks=sub_decks,
         concept_deck=concept_deck,
         skill_deck=skill_deck,
+        chance_deck=chance_deck,
         pending_roll=roll,
         pending_cross=None,
     )
@@ -153,6 +157,9 @@ def current_decision(state: GameState) -> Decision | None:
         kind, owner = "cross_milestone", state.active_player.id
     elif state.pending_skill is not None:
         kind, owner = "skill", state.active_player.id
+    elif state.pending_chance_removal:
+        kind = "chance_removal"
+        owner = next(p.id for p in state.players if p.role_id == "pm")
     elif state.in_close_phase:
         kind = "close"
         owner = next(p.id for p in state.players if p.role_id == "pm")
@@ -188,6 +195,8 @@ def observe(state: GameState, player_id: str) -> str:
             f"Pending: {state.active_player.id} drew '{skill.name}', "
             f"not eligible ({state.active_player.role_id}) -- discard or give it away"
         )
+    elif state.pending_chance_removal:
+        lines.append("Pending: Chance card -- team (PM) must choose a Concept to remove")
     elif state.in_close_phase:
         deck = state.concept_deck
         lines.append(
