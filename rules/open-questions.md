@@ -154,6 +154,17 @@ offered the first Close phase the condition holds, and if not used by
 `end_close`, `role_swap_forfeited` permanently blocks it from coming
 back — even though the quadrant condition will typically stay true for
 the rest of the game.
-`CrossMilestone` decision; declining also wraps. Backward movement past
-the Gateway (`raw <= 0`) always wraps — Milestones only connect quadrants
-forward, so backward crossing isn't a thing the rules describe.
+
+## 13. `role_conditional` effect DSL encoding
+
+The Sheets -> YAML content pipeline (`tools/sync_content.py`) needs a
+compact per-cell syntax for every effect type. `role_conditional` is the
+one exception: it's recursive (`by_role: {role_id: list[Effect]}`, each
+nested effect potentially needing the same DSL), and no real card uses it
+yet, so there's no concrete example to design the syntax against.
+
+**Provisional choice:** not designed yet. The DSL currently covers
+`add_tokens`, `modify_requirement`, `buff`, `remove_concept`,
+`draw_concept`, `move_concept`, `role_swap`, and `special`. A Chance card
+needing `role_conditional` will need this revisited first — don't guess
+at a nested syntax with nothing real to validate it against.

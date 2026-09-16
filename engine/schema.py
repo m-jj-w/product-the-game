@@ -190,6 +190,7 @@ class Role(BaseModel):
     id: str
     name: str
     flavor: str | None = None
+    art: str | None = None
 
 
 class RolesFile(BaseModel):
@@ -209,6 +210,7 @@ class Skill(BaseModel):
     flavor: str | None = None
     eligible_roles: list[str] = Field(min_length=1)
     effects: list[AnyEffect]
+    art: str | None = None
 
 
 class SkillsFile(BaseModel):
@@ -230,6 +232,7 @@ class Concept(BaseModel):
     medium: Medium
     categories: list[Category] = Field(min_length=1)
     modifiers: list[AnyEffect] = Field(default_factory=list)
+    art: str | None = None
 
     @field_validator("categories")
     @classmethod
@@ -255,6 +258,7 @@ class ChanceCard(BaseModel):
     name: str
     flavor: str | None = None
     effects: list[AnyEffect]
+    art: str | None = None
 
 
 class ChanceFile(BaseModel):
@@ -274,6 +278,7 @@ class DvfCard(BaseModel):
     dim: Dim
     flavor: str | None = None
     effects: list[AnyEffect]
+    art: str | None = None
 
 
 class DvfDeck(BaseModel):
