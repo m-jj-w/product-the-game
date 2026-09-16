@@ -12,22 +12,35 @@ from engine.rules import (
     Action,
     CrossMilestone,
     Decision,
+    DrawConcept,
+    EndClose,
     MoveConcept,
     Outcome,
+    RemoveConcept,
     apply,
     is_over,
     legal_actions,
 )
 from engine.schema import GameData
-from engine.state import BoardPosition, ConceptInstance, DVFTokens, GameState, Player, SubDeck
+from engine.state import (
+    BoardPosition,
+    ConceptInstance,
+    Deck,
+    GameState,
+    Player,
+    entry_quadrant_id,
+)
 
 __all__ = [
     "Action",
     "CrossMilestone",
     "Decision",
+    "DrawConcept",
+    "EndClose",
     "MoveConcept",
     "NewGameConfig",
     "Outcome",
+    "RemoveConcept",
     "apply",
     "current_decision",
     "is_over",
@@ -77,15 +90,14 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
 
     concept_ids = list(config.data.concepts)
     rng.shuffle(concept_ids)
-    entry_quadrant_id = min(config.data.board.quadrants, key=lambda q: q.order).id
+    starting_ids = concept_ids[:STARTING_PORTFOLIO_SIZE]
+    remaining_ids = concept_ids[STARTING_PORTFOLIO_SIZE:]
+    entry_id = entry_quadrant_id(config.data)
     portfolio = tuple(
-        ConceptInstance(
-            card_id=cid,
-            position=BoardPosition(quadrant_id=entry_quadrant_id, offset=0),
-            tokens=DVFTokens(),
-        )
-        for cid in concept_ids[:STARTING_PORTFOLIO_SIZE]
+        ConceptInstance(card_id=cid, position=BoardPosition(quadrant_id=entry_id, offset=0))
+        for cid in starting_ids
     )
+    concept_deck = Deck(draw_pile=tuple(remaining_ids))
 
     sub_decks = _build_initial_sub_decks(config.data, rng)
     roll = rng.randint(1, 6)
@@ -99,29 +111,39 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
         bank=0.0,
         rng_state=rng.getstate(),
         dvf_sub_decks=sub_decks,
+        concept_deck=concept_deck,
         pending_roll=roll,
         pending_cross=None,
     )
 
 
-def _build_initial_sub_decks(data: GameData, rng: random.Random) -> dict[tuple[str, str], SubDeck]:
-    sub_decks: dict[tuple[str, str], SubDeck] = {}
+def _build_initial_sub_decks(data: GameData, rng: random.Random) -> dict[tuple[str, str], Deck]:
+    sub_decks: dict[tuple[str, str], Deck] = {}
     for quadrant in data.board.quadrants:
         deck = data.dvf_decks.get(quadrant.id)
         cards = deck.cards if deck is not None else []
         for dim in ("D", "V", "F"):
             card_ids = [c.id for c in cards if c.dim == dim]
             rng.shuffle(card_ids)
-            sub_decks[(quadrant.id, dim)] = SubDeck(draw_pile=tuple(card_ids))
+            sub_decks[(quadrant.id, dim)] = Deck(draw_pile=tuple(card_ids))
     return sub_decks
 
 
 def current_decision(state: GameState) -> Decision | None:
-    """What's being decided and who decides it. None once is_over(state) is set."""
+    """What's being decided and who decides it. None once is_over(state) is set.
+
+    Close-phase decisions are owned by the PM, not necessarily the active
+    player (CLAUDE.md's decision table: "Team (PM decides)")."""
     if is_over(state) is not None:
         return None
-    kind = "cross_milestone" if state.pending_cross is not None else "move"
-    return Decision(kind=kind, owner=state.active_player.id, actions=tuple(legal_actions(state)))
+    if state.pending_cross is not None:
+        kind, owner = "cross_milestone", state.active_player.id
+    elif state.in_close_phase:
+        kind = "close"
+        owner = next(p.id for p in state.players if p.role_id == "pm")
+    else:
+        kind, owner = "move", state.active_player.id
+    return Decision(kind=kind, owner=owner, actions=tuple(legal_actions(state)))
 
 
 def observe(state: GameState, player_id: str) -> str:
@@ -141,6 +163,13 @@ def observe(state: GameState, player_id: str) -> str:
         )
     if state.pending_cross is not None:
         lines.append(f"Pending: cross-milestone decision for '{state.pending_cross.concept_id}'")
+    elif state.in_close_phase:
+        deck = state.concept_deck
+        lines.append(
+            f"Close phase (PM decides): remove/draw Concepts or end_close -- "
+            f"concept deck has {len(deck.draw_pile)} in draw pile, "
+            f"{len(deck.discard_pile)} in discard"
+        )
     elif state.pending_roll is not None:
         lines.append(f"Rolled: {state.pending_roll}")
     outcome = is_over(state)

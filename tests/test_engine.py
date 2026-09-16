@@ -1,12 +1,13 @@
 """End-to-end tests for engine/engine.py: new_game() setup."""
 
+import random
 from pathlib import Path
 
 import pytest
 
-from engine.engine import NewGameConfig, new_game
+from engine.engine import NewGameConfig, current_decision, new_game
 from engine.schema import load_game_data
-from engine.state import BoardPosition
+from engine.state import BoardPosition, ConceptInstance, GameState, Player
 from tests.fixtures import make_game_data
 
 REAL_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -68,3 +69,40 @@ class TestNewGameSetup:
                 deck = state.dvf_sub_decks[(quadrant_id, dim)]
                 assert len(deck.draw_pile) == 2  # fixtures.make_dvf_decks' cards_per_dim default
                 assert deck.discard_pile == ()
+
+    def test_concept_deck_holds_leftover_concepts(self) -> None:
+        data = make_game_data(concept_count=7)
+        state = new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+        assert len(state.portfolio) == 5
+        assert len(state.concept_deck.draw_pile) == 2
+        assert state.concept_deck.discard_pile == ()
+
+        portfolio_ids = {c.card_id for c in state.portfolio}
+        deck_ids = set(state.concept_deck.draw_pile)
+        assert portfolio_ids.isdisjoint(deck_ids)
+        assert portfolio_ids | deck_ids == set(data.concepts)
+
+
+class TestClosePhaseDecisionOwnership:
+    def test_close_decision_is_owned_by_pm_even_when_not_active_player(self) -> None:
+        data = make_game_data()
+        players = (
+            Player(id="alice", role_id="designer"),
+            Player(id="bob", role_id="pm"),
+        )
+        state = GameState(
+            data=data,
+            turn=0,
+            active_player_index=0,  # alice is the active player this turn...
+            players=players,
+            portfolio=(
+                ConceptInstance(card_id="concept_0", position=BoardPosition("discovery", 0)),
+            ),
+            bank=0.0,
+            rng_state=random.Random(0).getstate(),
+            in_close_phase=True,
+        )
+        decision = current_decision(state)
+        assert decision is not None
+        assert decision.kind == "close"
+        assert decision.owner == "bob"  # ...but Close phase decisions belong to the PM

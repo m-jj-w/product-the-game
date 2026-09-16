@@ -65,9 +65,11 @@ class PendingCross:
 
 
 @dataclass(frozen=True)
-class SubDeck:
-    """One (quadrant, dim) DVF sub-deck. Cards move straight to discard when
-    drawn; the next draw after the pile empties reshuffles the discard."""
+class Deck:
+    """A draw pile plus a discard pile. Cards move straight to discard when
+    drawn; the next draw after the pile empties reshuffles the discard.
+    Used both for the per-(quadrant, dim) DVF sub-decks and the single
+    Concept deck."""
 
     draw_pile: tuple[str, ...]
     discard_pile: tuple[str, ...] = ()
@@ -82,7 +84,9 @@ class GameState:
     portfolio: tuple[ConceptInstance, ...]
     bank: float
     rng_state: tuple
-    dvf_sub_decks: dict[tuple[str, str], SubDeck] = field(default_factory=dict)
+    dvf_sub_decks: dict[tuple[str, str], Deck] = field(default_factory=dict)
+    concept_deck: Deck = field(default_factory=lambda: Deck(draw_pile=()))
+    in_close_phase: bool = False
     pending_roll: int | None = None
     pending_cross: PendingCross | None = None
 
@@ -103,3 +107,8 @@ def with_concept(state: GameState, new_instance: ConceptInstance) -> GameState:
         new_instance if c.card_id == new_instance.card_id else c for c in state.portfolio
     )
     return dataclasses.replace(state, portfolio=new_portfolio)
+
+
+def entry_quadrant_id(data: GameData) -> str:
+    """New Concepts always enter at the lowest-order quadrant (Discovery, rules.md sec 4)."""
+    return min(data.board.quadrants, key=lambda q: q.order).id

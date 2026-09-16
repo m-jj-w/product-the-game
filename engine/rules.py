@@ -1,8 +1,10 @@
 """legal_actions, apply, is_over — the core turn state machine.
 
-Skills and Chance spaces are still no-ops (step 5); D/V/F spaces draw from
-the landing Concept's current-quadrant sub-deck and apply the card via
-engine/effects.py.
+Skills and Chance spaces, and team role swaps, are still no-ops (step 5);
+D/V/F spaces draw from the landing Concept's current-quadrant sub-deck and
+apply the card via engine/effects.py. After Move+Draw resolves, the team
+(PM) may remove/draw Concepts any number of times in the Close phase
+before the turn actually ends (rules.md sec 8.3).
 """
 
 from __future__ import annotations
@@ -17,10 +19,12 @@ from engine.modifiers import qualifies
 from engine.schema import Quadrant
 from engine.state import (
     BoardPosition,
+    ConceptInstance,
+    Deck,
     DVFTokens,
     GameState,
     PendingCross,
-    SubDeck,
+    entry_quadrant_id,
     get_concept,
     with_concept,
 )
@@ -42,12 +46,27 @@ class CrossMilestone:
     cross: bool
 
 
-Action = MoveConcept | CrossMilestone
+@dataclass(frozen=True)
+class RemoveConcept:
+    concept_id: str
+
+
+@dataclass(frozen=True)
+class DrawConcept:
+    pass
+
+
+@dataclass(frozen=True)
+class EndClose:
+    pass
+
+
+Action = MoveConcept | CrossMilestone | RemoveConcept | DrawConcept | EndClose
 
 
 @dataclass(frozen=True)
 class Decision:
-    kind: Literal["move", "cross_milestone"]
+    kind: Literal["move", "cross_milestone", "close"]
     owner: str
     actions: tuple[Action, ...]
 
@@ -75,12 +94,24 @@ def _quadrant_by_id(state: GameState, quadrant_id: str) -> Quadrant:
     raise KeyError(f"unknown quadrant '{quadrant_id}'")
 
 
+def _deck_has_cards(deck: Deck) -> bool:
+    return bool(deck.draw_pile) or bool(deck.discard_pile)
+
+
 def legal_actions(state: GameState) -> list[Action]:
     if is_over(state) is not None:
         return []
     if state.pending_cross is not None:
         concept_id = state.pending_cross.concept_id
         return [CrossMilestone(concept_id, True), CrossMilestone(concept_id, False)]
+    if state.in_close_phase:
+        actions: list[Action] = []
+        if len(state.portfolio) > 1:
+            actions.extend(RemoveConcept(c.card_id) for c in state.portfolio)
+        if len(state.portfolio) < 5 and _deck_has_cards(state.concept_deck):
+            actions.append(DrawConcept())
+        actions.append(EndClose())
+        return actions
     return [
         MoveConcept(c.card_id, direction)
         for c in state.portfolio
@@ -112,21 +143,19 @@ def _end_turn(state: GameState) -> GameState:
     )
 
 
-def _draw_card(
-    sub_decks: dict[tuple[str, str], SubDeck], rng_state: tuple, quadrant_id: str, dim: str
-) -> tuple[str, dict[tuple[str, str], SubDeck], tuple]:
-    key = (quadrant_id, dim)
-    deck = sub_decks.get(key)
-    if deck is None:
-        raise KeyError(f"no sub-deck for quadrant '{quadrant_id}' dim '{dim}'")
+def _draw_from_deck(deck: Deck, rng_state: tuple) -> tuple[str, Deck, tuple]:
+    """Pop the top card, reshuffling the discard into a fresh draw pile first
+    if needed. Raises if the deck has no cards at all, ever.
 
+    The drawn card is *not* added to the discard pile here -- the caller
+    decides that. A DVF card is used once and discarded immediately; a
+    drawn Concept stays out of both piles, tracked in the Portfolio
+    instead, until it's later removed.
+    """
     draw_pile, discard_pile = deck.draw_pile, deck.discard_pile
     if not draw_pile:
         if not discard_pile:
-            raise ValueError(
-                f"no cards defined for quadrant '{quadrant_id}' dim '{dim}' "
-                f"(data/dvf/{quadrant_id}.yaml has none) -- see rules/open-questions.md"
-            )
+            raise ValueError("deck has no cards defined at all")
         rng = random.Random()
         rng.setstate(rng_state)
         shuffled = list(discard_pile)
@@ -135,15 +164,28 @@ def _draw_card(
         rng_state = rng.getstate()
 
     card_id, remaining = draw_pile[0], draw_pile[1:]
-    new_sub_decks = {**sub_decks, key: SubDeck(remaining, discard_pile + (card_id,))}
-    return card_id, new_sub_decks, rng_state
+    return card_id, Deck(remaining, discard_pile), rng_state
+
+
+def _draw_dvf_card(state: GameState, quadrant_id: str, dim: str) -> tuple[str, GameState]:
+    key = (quadrant_id, dim)
+    deck = state.dvf_sub_decks.get(key)
+    if deck is None:
+        raise KeyError(f"no sub-deck for quadrant '{quadrant_id}' dim '{dim}'")
+    try:
+        card_id, new_deck, new_rng_state = _draw_from_deck(deck, state.rng_state)
+    except ValueError as exc:
+        raise ValueError(
+            f"no cards defined for quadrant '{quadrant_id}' dim '{dim}' "
+            f"(data/dvf/{quadrant_id}.yaml has none) -- see rules/open-questions.md"
+        ) from exc
+    new_deck = dataclasses.replace(new_deck, discard_pile=new_deck.discard_pile + (card_id,))
+    new_sub_decks = {**state.dvf_sub_decks, key: new_deck}
+    return card_id, dataclasses.replace(state, dvf_sub_decks=new_sub_decks, rng_state=new_rng_state)
 
 
 def _draw_and_apply(state: GameState, concept_id: str, quadrant_id: str, dim: str) -> GameState:
-    card_id, new_sub_decks, new_rng_state = _draw_card(
-        state.dvf_sub_decks, state.rng_state, quadrant_id, dim
-    )
-    state = dataclasses.replace(state, dvf_sub_decks=new_sub_decks, rng_state=new_rng_state)
+    card_id, state = _draw_dvf_card(state, quadrant_id, dim)
     card = next(c for c in state.data.dvf_decks[quadrant_id].cards if c.id == card_id)
     return apply_effects(state, concept_id, card.effects)
 
@@ -167,6 +209,15 @@ def _finalize_position(state: GameState, concept_id: str, new_offset: int) -> Ga
     return _draw_and_apply(state, concept_id, quadrant_id, space_type)
 
 
+def _enter_close_phase(state: GameState) -> GameState:
+    """Move+Draw is done for this turn. Every turn gets a Close phase
+    (rules.md sec 8.3), regardless of what happened during Move/Draw --
+    unless the game just ended (e.g. Finish completed the bank)."""
+    if is_over(state) is not None:
+        return state
+    return dataclasses.replace(state, in_close_phase=True)
+
+
 def apply(state: GameState, action: Action) -> GameState:
     if is_over(state) is not None:
         raise ValueError("game is already over")
@@ -174,7 +225,55 @@ def apply(state: GameState, action: Action) -> GameState:
         return _apply_move(state, action)
     if isinstance(action, CrossMilestone):
         return _apply_cross(state, action)
+    if isinstance(action, RemoveConcept):
+        return _apply_remove_concept(state, action)
+    if isinstance(action, DrawConcept):
+        return _apply_draw_concept(state)
+    if isinstance(action, EndClose):
+        return _apply_end_close(state)
     raise TypeError(f"unknown action type: {type(action)!r}")
+
+
+def _require_close_phase(state: GameState) -> None:
+    if not state.in_close_phase:
+        raise ValueError("not in the Close phase")
+
+
+def _apply_remove_concept(state: GameState, action: RemoveConcept) -> GameState:
+    _require_close_phase(state)
+    if len(state.portfolio) <= 1:
+        raise ValueError("cannot remove the last active Concept")
+    instance = get_concept(state, action.concept_id)
+    new_portfolio = tuple(c for c in state.portfolio if c.card_id != instance.card_id)
+    new_deck = dataclasses.replace(
+        state.concept_deck, discard_pile=state.concept_deck.discard_pile + (instance.card_id,)
+    )
+    return dataclasses.replace(state, portfolio=new_portfolio, concept_deck=new_deck)
+
+
+def _apply_draw_concept(state: GameState) -> GameState:
+    _require_close_phase(state)
+    if len(state.portfolio) >= 5:
+        raise ValueError("Portfolio already has 5 active Concepts")
+    try:
+        card_id, new_deck, new_rng_state = _draw_from_deck(state.concept_deck, state.rng_state)
+    except ValueError as exc:
+        raise ValueError("no Concepts left to draw") from exc
+    new_instance = ConceptInstance(
+        card_id=card_id,
+        position=BoardPosition(entry_quadrant_id(state.data), 0),
+    )
+    return dataclasses.replace(
+        state,
+        portfolio=state.portfolio + (new_instance,),
+        concept_deck=new_deck,
+        rng_state=new_rng_state,
+    )
+
+
+def _apply_end_close(state: GameState) -> GameState:
+    _require_close_phase(state)
+    return _end_turn(dataclasses.replace(state, in_close_phase=False))
 
 
 def _apply_move(state: GameState, action: MoveConcept) -> GameState:
@@ -204,7 +303,7 @@ def _apply_move(state: GameState, action: MoveConcept) -> GameState:
 
     state = dataclasses.replace(state, pending_roll=None)
     state = _finalize_position(state, instance.card_id, raw % LOOP_SIZE)
-    return _end_turn(state)
+    return _enter_close_phase(state)
 
 
 def _apply_cross(state: GameState, action: CrossMilestone) -> GameState:
@@ -219,7 +318,7 @@ def _apply_cross(state: GameState, action: CrossMilestone) -> GameState:
     if not action.cross:
         state = dataclasses.replace(state, pending_cross=None)
         state = _finalize_position(state, instance.card_id, pending.same_quadrant_offset)
-        return _end_turn(state)
+        return _enter_close_phase(state)
 
     if pending.next_quadrant_id is None:
         card = state.data.concepts[instance.card_id]
@@ -227,7 +326,7 @@ def _apply_cross(state: GameState, action: CrossMilestone) -> GameState:
         resolved = dataclasses.replace(
             state, portfolio=new_portfolio, bank=state.bank + card.tam, pending_cross=None
         )
-        return _end_turn(resolved)
+        return _enter_close_phase(resolved)
 
     new_instance = dataclasses.replace(
         instance,
@@ -235,4 +334,4 @@ def _apply_cross(state: GameState, action: CrossMilestone) -> GameState:
         tokens=DVFTokens(),
     )
     resolved = dataclasses.replace(with_concept(state, new_instance), pending_cross=None)
-    return _end_turn(resolved)
+    return _enter_close_phase(resolved)
