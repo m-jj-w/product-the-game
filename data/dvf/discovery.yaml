@@ -1,0 +1,14 @@
+# Desirability/Viability/Feasibility sub-deck for the Discovery quadrant.
+#
+# "Smoke Testing" isn't tagged with a quadrant in the rules; placed here
+# provisionally (see rules/open-questions.md #2).
+quadrant: discovery
+cards:
+  - id: smoke_testing
+    name: Smoke Testing
+    dim: D
+    flavor: "A cheap way to get signal from noise."
+    effects:
+      - type: add_tokens
+        dim: D
+        n: 1

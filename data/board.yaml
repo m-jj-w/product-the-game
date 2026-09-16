@@ -1,0 +1,48 @@
+# Board — rules.md §4, §9.2
+#
+# `spaces` holds exactly the 15 coded spaces per loop (Gateway is implicit,
+# outside this list — rules.md §4). The order below is a fixed placeholder,
+# not a rules decision (see rules/open-questions.md #1).
+#
+# Milestone names use the rulebook's own placeholder labels ("Milestone 1",
+# "Milestone 3", "Milestone 4") rather than invented flavor names.
+quadrants:
+  - id: discovery
+    name: Discovery
+    order: 1
+    milestone:
+      id: milestone_1
+      name: "Milestone 1"
+      requirement: {D: 3, V: 2, F: 1}
+      leads_to: npd
+    spaces: [D, V, F, skills, chance, D, V, F, skills, chance, D, V, F, skills, chance]
+
+  - id: npd
+    name: New Product Development
+    order: 2
+    milestone:
+      id: product_market_fit
+      name: "Product Market Fit Milestone"
+      requirement: {D: 2, V: 2, F: 2}
+      leads_to: scaling
+    spaces: [D, V, F, skills, chance, D, V, F, skills, chance, D, V, F, skills, chance]
+
+  - id: scaling
+    name: Scaling
+    order: 3
+    milestone:
+      id: milestone_3
+      name: "Milestone 3"
+      requirement: {D: 1, V: 2, F: 3}
+      leads_to: market_maturity
+    spaces: [D, V, F, skills, chance, D, V, F, skills, chance, D, V, F, skills, chance]
+
+  - id: market_maturity
+    name: Market Maturity
+    order: 4
+    milestone:
+      id: milestone_4
+      name: "Milestone 4"
+      requirement: {D: 0, V: 3, F: 2}
+      leads_to: finish
+    spaces: [D, V, F, skills, chance, D, V, F, skills, chance, D, V, F, skills, chance]

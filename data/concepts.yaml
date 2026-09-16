@@ -1,0 +1,27 @@
+# Concept Cards (Purple) — rules.md §11
+#
+# TAM is stored in $B units (5.0 == $5B), matching the $1B win-threshold unit.
+concepts:
+  - id: platform_play
+    name: Platform Play
+    flavor: "A two-sided network; twice the work, twice the fun."
+    tam: 5.0
+    medium: digital
+    categories: [product, service, experience]
+    modifiers:
+      - type: modify_requirement
+        dim: all
+        op: multiply
+        value: 2
+
+  - id: user_portal
+    name: User Portal
+    flavor: "The cake is a lie."
+    tam: 0.5
+    medium: digital
+    categories: [experience]
+    modifiers:
+      - type: modify_requirement
+        dim: D
+        op: add
+        value: 1

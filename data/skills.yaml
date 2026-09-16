@@ -1,0 +1,66 @@
+# Skill Cards (Yellow) — rules.md §11
+#
+# All 7 example Skills from the rules. Engineer and Data & ML Engineer have
+# no eligible Skills yet — the rules explicitly flag those as unwritten
+# (see rules/open-questions.md #4). Don't invent placeholders for them.
+skills:
+  - id: service_designer
+    name: Service Designer
+    eligible_roles: [designer]
+    effects:
+      - type: buff
+        dim: D
+        n: 1
+        filter: {category: service}
+      - type: buff
+        dim: F
+        n: 1
+        filter: {category: service}
+
+  - id: experience_designer
+    name: Experience Designer
+    eligible_roles: [designer]
+    effects:
+      - type: buff
+        dim: D
+        n: 1
+        filter: {medium: digital}
+
+  - id: journey_mapper
+    name: Journey Mapper
+    eligible_roles: [designer]
+    effects:
+      - type: buff
+        dim: D
+        n: 1
+      - type: buff
+        dim: F
+        n: 1
+
+  - id: user_researcher
+    name: User Researcher
+    eligible_roles: [designer, researcher]
+    effects:
+      - type: buff
+        dim: D
+        n: 1
+
+  - id: venture_capitalist
+    name: Venture Capitalist
+    eligible_roles: [pm]
+    effects:
+      - type: buff
+        dim: V
+        n: 1
+
+  - id: agile_methods
+    name: Agile Methods
+    eligible_roles: [pm, designer, engineer, researcher, data_ml_engineer]
+    effects:
+      - special: agile_methods
+
+  - id: scrum_master
+    name: Scrum Master
+    eligible_roles: [pm, designer, engineer, researcher, data_ml_engineer]
+    effects:
+      - special: scrum_master

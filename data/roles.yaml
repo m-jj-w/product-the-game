@@ -1,0 +1,19 @@
+# Role Cards (Beige) — rules.md §3, §5
+#
+# No flavor text is given for role cards in the rules yet
+# (see rules/open-questions.md #3).
+roles:
+  - id: pm
+    name: Product Manager
+
+  - id: designer
+    name: Designer
+
+  - id: engineer
+    name: Engineer
+
+  - id: researcher
+    name: Researcher
+
+  - id: data_ml_engineer
+    name: Data & ML Engineer
