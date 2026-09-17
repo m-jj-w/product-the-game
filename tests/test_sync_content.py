@@ -214,6 +214,32 @@ class TestRowToDict:
             "effects": [{"type": "add_tokens", "dim": "D", "n": 1}],
         }
 
+    def test_dvf_row_blank_weight_omitted(self) -> None:
+        row = {
+            "id": "smoke_testing",
+            "name": "Smoke Testing",
+            "dim": "D",
+            "quadrant": "discovery",
+            "effects": "add_tokens dim=D n=1",
+            "flavor": "",
+            "art": "",
+            "weight": "",
+        }
+        assert "weight" not in dvf_row_to_dict(row)
+
+    def test_dvf_row_explicit_weight_parsed(self) -> None:
+        row = {
+            "id": "smoke_testing",
+            "name": "Smoke Testing",
+            "dim": "D",
+            "quadrant": "discovery",
+            "effects": "add_tokens dim=D n=1",
+            "flavor": "",
+            "art": "",
+            "weight": "3",
+        }
+        assert dvf_row_to_dict(row)["weight"] == 3
+
 
 def _seed_board(data_dir: Path) -> None:
     board = make_board()
@@ -283,6 +309,22 @@ class TestSyncContent:
         data = load_game_data(tmp_path)
         assert "platform_play" in data.concepts
         assert data.concepts["platform_play"].tam == 5.0
+
+    def test_explicit_weight_column_round_trips_to_loaded_data(self, tmp_path: Path) -> None:
+        _seed_board(tmp_path)
+        sheet = {
+            **_VALID_SHEET,
+            "DVF": [{**_VALID_SHEET["DVF"][0], "weight": "3"}],
+        }
+        sync_content(sheet, tmp_path)
+        data = load_game_data(tmp_path)
+        assert data.dvf_decks["discovery"].cards[0].weight == 3
+
+    def test_blank_weight_column_defaults_to_one(self, tmp_path: Path) -> None:
+        _seed_board(tmp_path)
+        sync_content(_VALID_SHEET, tmp_path)  # _VALID_SHEET rows have no "weight" key at all
+        data = load_game_data(tmp_path)
+        assert data.dvf_decks["discovery"].cards[0].weight == 1
 
     def test_all_four_quadrant_files_written_even_when_empty(self, tmp_path: Path) -> None:
         _seed_board(tmp_path)

@@ -97,6 +97,74 @@ class TestUnknownEffectType:
         assert effect.handler == "agile_methods"
 
 
+class TestCardWeight:
+    """`weight` controls draw commonality (see the deck-construction plan);
+    it's additive and optional on Skill/ChanceCard/DvfCard, never Concept."""
+
+    def test_defaults_to_one_when_omitted(self) -> None:
+        skills_file = SkillsFile.model_validate(
+            {
+                "skills": [
+                    {
+                        "id": "s",
+                        "name": "S",
+                        "eligible_roles": ["pm"],
+                        "effects": [{"type": "buff", "dim": "D", "n": 1}],
+                    }
+                ]
+            }
+        )
+        assert skills_file.skills[0].weight == 1
+
+    def test_explicit_weight_accepted(self) -> None:
+        skills_file = SkillsFile.model_validate(
+            {
+                "skills": [
+                    {
+                        "id": "s",
+                        "name": "S",
+                        "eligible_roles": ["pm"],
+                        "effects": [{"type": "buff", "dim": "D", "n": 1}],
+                        "weight": 5,
+                    }
+                ]
+            }
+        )
+        assert skills_file.skills[0].weight == 5
+
+    def test_zero_weight_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            SkillsFile.model_validate(
+                {
+                    "skills": [
+                        {
+                            "id": "s",
+                            "name": "S",
+                            "eligible_roles": ["pm"],
+                            "effects": [{"type": "buff", "dim": "D", "n": 1}],
+                            "weight": 0,
+                        }
+                    ]
+                }
+            )
+
+    def test_negative_weight_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            SkillsFile.model_validate(
+                {
+                    "skills": [
+                        {
+                            "id": "s",
+                            "name": "S",
+                            "eligible_roles": ["pm"],
+                            "effects": [{"type": "buff", "dim": "D", "n": 1}],
+                            "weight": -1,
+                        }
+                    ]
+                }
+            )
+
+
 class TestUnknownRoleReference:
     def test_skill_eligible_role_unknown(self) -> None:
         skills_file = SkillsFile.model_validate(

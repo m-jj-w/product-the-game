@@ -42,7 +42,7 @@ def build_workbook(data: GameData) -> Workbook:
     _write_tab(
         wb,
         "Skills",
-        ["id", "name", "flavor", "eligible_roles", "effects", "art"],
+        ["id", "name", "flavor", "eligible_roles", "effects", "art", "weight"],
         [
             [
                 s.id,
@@ -51,6 +51,7 @@ def build_workbook(data: GameData) -> Workbook:
                 ",".join(s.eligible_roles),
                 serialize_effects([e.model_dump(exclude_none=True) for e in s.effects]),
                 s.art or "",
+                s.weight,
             ]
             for s in data.skills.values()
         ],
@@ -78,7 +79,7 @@ def build_workbook(data: GameData) -> Workbook:
     _write_tab(
         wb,
         "Chance",
-        ["id", "name", "flavor", "effects", "art"],
+        ["id", "name", "flavor", "effects", "art", "weight"],
         [
             [
                 card.id,
@@ -86,6 +87,7 @@ def build_workbook(data: GameData) -> Workbook:
                 card.flavor or "",
                 serialize_effects([e.model_dump(exclude_none=True) for e in card.effects]),
                 card.art or "",
+                card.weight,
             ]
             for card in data.chance_cards.values()
         ],
@@ -103,9 +105,15 @@ def build_workbook(data: GameData) -> Workbook:
                     card.dim,
                     serialize_effects([e.model_dump(exclude_none=True) for e in card.effects]),
                     card.art or "",
+                    card.weight,
                 ]
             )
-    _write_tab(wb, "DVF", ["id", "name", "flavor", "quadrant", "dim", "effects", "art"], dvf_rows)
+    _write_tab(
+        wb,
+        "DVF",
+        ["id", "name", "flavor", "quadrant", "dim", "effects", "art", "weight"],
+        dvf_rows,
+    )
 
     return wb
 

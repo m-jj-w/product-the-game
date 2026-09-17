@@ -142,6 +142,14 @@ def _optional_text_fields(row: dict[str, str], card: dict) -> None:
             card[field] = value
 
 
+def _optional_weight_field(row: dict[str, str], card: dict) -> None:
+    """A blank `weight` cell means the schema default (1, i.e. no rarity
+    adjustment) -- most cards will never set this column."""
+    value = (row.get("weight") or "").strip()
+    if value:
+        card["weight"] = int(value)
+
+
 def role_row_to_dict(row: dict[str, str]) -> dict:
     card = {"id": row["id"].strip(), "name": row["name"].strip()}
     _optional_text_fields(row, card)
@@ -156,6 +164,7 @@ def skill_row_to_dict(row: dict[str, str]) -> dict:
         "effects": parse_effects_cell(row.get("effects", "")),
     }
     _optional_text_fields(row, card)
+    _optional_weight_field(row, card)
     return card
 
 
@@ -179,6 +188,7 @@ def chance_row_to_dict(row: dict[str, str]) -> dict:
         "effects": parse_effects_cell(row.get("effects", "")),
     }
     _optional_text_fields(row, card)
+    _optional_weight_field(row, card)
     return card
 
 
@@ -190,6 +200,7 @@ def dvf_row_to_dict(row: dict[str, str]) -> dict:
         "effects": parse_effects_cell(row.get("effects", "")),
     }
     _optional_text_fields(row, card)
+    _optional_weight_field(row, card)
     return card
 
 

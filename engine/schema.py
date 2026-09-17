@@ -211,6 +211,7 @@ class Skill(BaseModel):
     eligible_roles: list[str] = Field(min_length=1)
     effects: list[AnyEffect]
     art: str | None = None
+    weight: int = Field(default=1, ge=1)
 
 
 class SkillsFile(BaseModel):
@@ -259,6 +260,7 @@ class ChanceCard(BaseModel):
     flavor: str | None = None
     effects: list[AnyEffect]
     art: str | None = None
+    weight: int = Field(default=1, ge=1)
 
 
 class ChanceFile(BaseModel):
@@ -279,6 +281,7 @@ class DvfCard(BaseModel):
     flavor: str | None = None
     effects: list[AnyEffect]
     art: str | None = None
+    weight: int = Field(default=1, ge=1)
 
 
 class DvfDeck(BaseModel):

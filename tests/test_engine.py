@@ -1,14 +1,22 @@
 """End-to-end tests for engine/engine.py: new_game() setup."""
 
 import random
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from engine.engine import NewGameConfig, current_decision, new_game
-from engine.schema import load_game_data
+from engine.schema import DvfCard, DvfDeck, GameData, Skill, load_game_data
 from engine.state import BoardPosition, ConceptInstance, GameState, Player
-from tests.fixtures import make_game_data
+from tests.fixtures import (
+    make_board,
+    make_chance_cards,
+    make_concepts,
+    make_dvf_decks,
+    make_game_data,
+    make_roles,
+)
 
 REAL_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -81,6 +89,75 @@ class TestNewGameSetup:
         deck_ids = set(state.concept_deck.draw_pile)
         assert portfolio_ids.isdisjoint(deck_ids)
         assert portfolio_ids | deck_ids == set(data.concepts)
+
+
+class TestWeightedDeckConstruction:
+    """A card's `weight` controls how many copies land in the initial
+    shuffle bag -- rarity without hand-duplicated data rows. Concepts are
+    deliberately excluded (see the deck-construction plan): they're drawn
+    without replacement, so `concept_deck`'s construction is untouched."""
+
+    def test_dvf_sub_deck_expands_by_weight(self) -> None:
+        cards = [
+            DvfCard(
+                id="common",
+                name="Common",
+                dim="D",
+                weight=3,
+                effects=[{"type": "add_tokens", "dim": "D", "n": 1}],
+            ),
+            DvfCard(
+                id="rare",
+                name="Rare",
+                dim="D",
+                weight=1,
+                effects=[{"type": "add_tokens", "dim": "D", "n": 1}],
+            ),
+        ]
+        data = make_game_data(dvf_decks={"discovery": DvfDeck(quadrant="discovery", cards=cards)})
+        state = new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+        pile = state.dvf_sub_decks[("discovery", "D")].draw_pile
+        assert Counter(pile) == Counter({"common": 3, "rare": 1})
+
+    def test_skill_deck_expands_by_weight(self) -> None:
+        skills = {
+            "common": Skill(
+                id="common",
+                name="Common",
+                eligible_roles=["pm"],
+                weight=4,
+                effects=[{"type": "buff", "dim": "D", "n": 1}],
+            ),
+            "rare": Skill(
+                id="rare",
+                name="Rare",
+                eligible_roles=["pm"],
+                weight=1,
+                effects=[{"type": "buff", "dim": "D", "n": 1}],
+            ),
+        }
+        data = GameData(
+            roles=make_roles(),
+            skills=skills,
+            concepts=make_concepts(),
+            chance_cards=make_chance_cards(),
+            dvf_decks=make_dvf_decks(),
+            board=make_board(),
+        )
+        state = new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+        assert Counter(state.skill_deck.draw_pile) == Counter({"common": 4, "rare": 1})
+
+    def test_default_weight_matches_unweighted_behavior(self) -> None:
+        """Every existing card omits `weight` -- confirms the new expansion
+        logic is a no-op for the common case (each id appears exactly once)."""
+        data = make_game_data()
+        state = new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+        for quadrant_id in ("discovery", "npd", "scaling", "market_maturity"):
+            for dim in ("D", "V", "F"):
+                pile = state.dvf_sub_decks[(quadrant_id, dim)].draw_pile
+                assert len(pile) == len(set(pile))
+        assert len(state.skill_deck.draw_pile) == len(set(state.skill_deck.draw_pile))
+        assert len(state.chance_deck.draw_pile) == len(set(state.chance_deck.draw_pile))
 
 
 class TestClosePhaseDecisionOwnership:

@@ -6,6 +6,7 @@ Agents, the UI, and the server talk to the game only through this module.
 from __future__ import annotations
 
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from engine.rules import (
@@ -26,7 +27,7 @@ from engine.rules import (
     is_over,
     legal_actions,
 )
-from engine.schema import GameData
+from engine.schema import ChanceCard, GameData, Skill
 from engine.state import (
     BoardPosition,
     ConceptInstance,
@@ -132,8 +133,13 @@ def new_game(config: NewGameConfig, seed: int) -> GameState:
     )
 
 
-def _build_shuffled_deck(card_ids: dict[str, object], rng: random.Random) -> Deck:
-    ids = list(card_ids)
+def _build_shuffled_deck(cards: Mapping[str, Skill | ChanceCard], rng: random.Random) -> Deck:
+    """A card's `weight` controls how many copies of it go into the shuffle
+    bag -- rarity without hand-duplicated rows in data/*.yaml. Once built,
+    a card's multiplicity carries into the discard pile as copies are
+    drawn, so `_draw_from_deck`'s reshuffle-from-discard preserves the
+    weighting for the rest of the game with no further bookkeeping."""
+    ids = [card_id for card_id, card in cards.items() for _ in range(card.weight)]
     rng.shuffle(ids)
     return Deck(draw_pile=tuple(ids))
 
@@ -144,7 +150,7 @@ def _build_initial_sub_decks(data: GameData, rng: random.Random) -> dict[tuple[s
         deck = data.dvf_decks.get(quadrant.id)
         cards = deck.cards if deck is not None else []
         for dim in ("D", "V", "F"):
-            card_ids = [c.id for c in cards if c.dim == dim]
+            card_ids = [c.id for c in cards if c.dim == dim for _ in range(c.weight)]
             rng.shuffle(card_ids)
             sub_decks[(quadrant.id, dim)] = Deck(draw_pile=tuple(card_ids))
     return sub_decks
