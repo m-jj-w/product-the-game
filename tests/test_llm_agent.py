@@ -16,6 +16,7 @@ from agents.llm_agent import (
     ChoiceLogEntry,
     GameLog,
     choose_action,
+    choose_action_index,
     describe_action,
     run_llm_game,
 )
@@ -173,6 +174,58 @@ class TestChooseAction:
             choose_action(client, "rules text", state, decision, descriptions, max_retries=3)
         assert client.call_count == 3
         assert "3 attempts" in str(exc_info.value)
+
+
+class TestChooseActionIndex:
+    """choose_action_index() is what choose_action() delegates to now --
+    same retry behavior, but from plain text/JSON (what an HTTP client
+    like cli/game_loop.py has) instead of live engine objects."""
+
+    def test_valid_first_response(self) -> None:
+        client = _ScriptedClient([_FakeResponse(1, "good reason")])
+        index, rationale, attempts = choose_action_index(
+            client, "rules text", "some observation", "move", "alice", ["forward", "backward"]
+        )
+        assert index == 1
+        assert rationale == "good reason"
+        assert attempts == 1
+
+    def test_invalid_then_valid_retries_once(self) -> None:
+        client = _ScriptedClient([_FakeResponse(99, "oops"), _FakeResponse(0, "corrected")])
+        index, rationale, attempts = choose_action_index(
+            client, "rules text", "some observation", "move", "alice", ["forward", "backward"]
+        )
+        assert index == 0
+        assert rationale == "corrected"
+        assert attempts == 2
+
+    def test_exhausting_retries_raises_with_context(self) -> None:
+        client = _ScriptedClient([_FakeResponse(99, "x") for _ in range(3)])
+        with pytest.raises(RuntimeError, match="move.*alice"):
+            choose_action_index(
+                client,
+                "rules text",
+                "some observation",
+                "move",
+                "alice",
+                ["forward", "backward"],
+                max_retries=3,
+            )
+
+    def test_choose_action_delegates_to_it(self) -> None:
+        # same scripted response either way -- confirms the refactor didn't
+        # change choose_action()'s own observable behavior.
+        state = _state()
+        decision = _move_decision(state)
+        descriptions = [describe_action(a, state) for a in decision.actions]
+        client = _ScriptedClient([_FakeResponse(1, "good reason")])
+
+        action, rationale, attempts = choose_action(
+            client, "rules text", state, decision, descriptions
+        )
+        assert action == decision.actions[1]
+        assert rationale == "good reason"
+        assert attempts == 1
 
 
 def _index_of_option(prompt: str, description: str) -> int | None:

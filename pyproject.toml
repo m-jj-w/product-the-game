@@ -8,17 +8,18 @@ dependencies = [
     "anthropic>=0.69",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.6", "openpyxl>=3.1", "httpx>=0.27"]
+dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.6", "openpyxl>=3.1"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["engine", "agents", "server"]
+packages = ["engine", "agents", "server", "cli"]
 
 [tool.ruff]
 target-version = "py312"

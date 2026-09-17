@@ -90,30 +90,45 @@ def describe_action(action: Action, state: GameState) -> str:
     raise TypeError(f"no description for action type: {type(action)!r}")
 
 
-def _build_prompt(state: GameState, decision: Decision, descriptions: list[str]) -> str:
+def _build_prompt_from_text(
+    observation: str, decision_kind: str, decision_owner: str, descriptions: list[str]
+) -> str:
     numbered = "\n".join(f"{i}. {desc}" for i, desc in enumerate(descriptions))
     return (
-        f"{observe(state, decision.owner)}\n\n"
-        f"You are deciding as: {decision.owner} ({decision.kind} decision).\n\n"
+        f"{observation}\n\n"
+        f"You are deciding as: {decision_owner} ({decision_kind} decision).\n\n"
         f"Choose one of the following actions by its number:\n{numbered}\n\n"
         "Respond with the action_index and a short rationale."
     )
 
 
-def choose_action(
+def _build_prompt(state: GameState, decision: Decision, descriptions: list[str]) -> str:
+    return _build_prompt_from_text(
+        observe(state, decision.owner), decision.kind, decision.owner, descriptions
+    )
+
+
+def choose_action_index(
     client: Any,
     rules_text: str,
-    state: GameState,
-    decision: Decision,
+    observation: str,
+    decision_kind: str,
+    decision_owner: str,
     descriptions: list[str],
     *,
     model: str = DEFAULT_MODEL,
     max_retries: int = 3,
-) -> tuple[Action, str, int]:
-    """Ask the LLM to pick one of `decision.actions`. Retries with the error
-    appended if it picks an out-of-range index. Returns (action, rationale,
-    attempts_taken)."""
-    prompt = _build_prompt(state, decision, descriptions)
+) -> tuple[int, str, int]:
+    """Ask the LLM to pick one of `descriptions` by index. Retries with the
+    error appended if it picks an out-of-range index. Returns (action_index,
+    rationale, attempts_taken).
+
+    Works from plain text/JSON -- what an HTTP client (cli/game_loop.py) has
+    -- rather than live engine objects. `choose_action()` below is an
+    in-process convenience wrapper for callers that already have a real
+    GameState/Decision.
+    """
+    prompt = _build_prompt_from_text(observation, decision_kind, decision_owner, descriptions)
     messages: list[dict] = [{"role": "user", "content": prompt}]
     system = [{"type": "text", "text": rules_text, "cache_control": {"type": "ephemeral"}}]
 
@@ -127,7 +142,7 @@ def choose_action(
         )
         choice = response.parsed_output
         if 0 <= choice.action_index < len(descriptions):
-            return decision.actions[choice.action_index], choice.rationale, attempt
+            return choice.action_index, choice.rationale, attempt
 
         messages.append({"role": "assistant", "content": response.content})
         messages.append(
@@ -142,8 +157,34 @@ def choose_action(
 
     raise RuntimeError(
         f"LLM failed to choose a valid action after {max_retries} attempts "
-        f"(decision: {decision.kind}, owner: {decision.owner})"
+        f"(decision: {decision_kind}, owner: {decision_owner})"
     )
+
+
+def choose_action(
+    client: Any,
+    rules_text: str,
+    state: GameState,
+    decision: Decision,
+    descriptions: list[str],
+    *,
+    model: str = DEFAULT_MODEL,
+    max_retries: int = 3,
+) -> tuple[Action, str, int]:
+    """Ask the LLM to pick one of `decision.actions`. In-process convenience
+    wrapper around choose_action_index() for callers that already have a
+    live GameState/Decision (e.g. run_llm_game())."""
+    index, rationale, attempts = choose_action_index(
+        client,
+        rules_text,
+        observe(state, decision.owner),
+        decision.kind,
+        decision.owner,
+        descriptions,
+        model=model,
+        max_retries=max_retries,
+    )
+    return decision.actions[index], rationale, attempts
 
 
 @dataclass(frozen=True)
