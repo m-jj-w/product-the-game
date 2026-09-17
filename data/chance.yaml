@@ -1,12 +1,50 @@
-# Chance Cards (Pink) — rules.md §11
-#
-# No explicit "target" field: a Chance effect implicitly targets the Concept
-# that landed on the space (rules.md §8.2) unless the effect itself signals
-# otherwise, e.g. remove_concept.chooser: team is portfolio-wide by
-# construction.
 chance_cards:
-  - id: budget_cuts
-    name: Budget Cuts
-    effects:
-      - type: remove_concept
-        chooser: team
+- id: budget_cuts
+  name: Budget Cuts
+  effects:
+  - type: remove_concept
+    chooser: team
+  weight: 1
+- id: pet_project
+  name: Pet Project
+  effects:
+  - type: special
+    handler: fetch_concept
+    target: pet_project
+  weight: 1
+- id: research_breakthrough
+  name: Research Breakthough
+  effects:
+  - type: special
+    handler: research_breakthrough
+  weight: 1
+- id: sick_day
+  name: Sick Day
+  effects:
+  - type: special
+    handler: sick_day
+  weight: 1
+- id: productivity
+  name: Productivity
+  effects:
+  - type: special
+    handler: productivity
+  weight: 1
+- id: retrospective
+  name: Retrospective
+  effects:
+  - type: special
+    handler: retrospective
+  weight: 1
+- id: expanded_scope
+  name: Expanded Scope
+  effects:
+  - type: special
+    handler: expand_portfolio
+  weight: 1
+- id: narrowed_scope
+  name: Narrowed Scope
+  effects:
+  - type: special
+    handler: narrow_portfolio
+  weight: 1

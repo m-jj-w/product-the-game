@@ -1,4 +1,98 @@
-# Desirability/Viability/Feasibility sub-deck for the New Product
-# Development quadrant. No example cards given in the rules yet.
 quadrant: npd
-cards: []
+cards:
+- id: Placeholder_NPD_D_1
+  name: Placeholder_NPD_D_1
+  dim: D
+  effects:
+  - type: add_tokens
+    dim: D
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_D_2
+  name: Placeholder_NPD_D_2
+  dim: D
+  effects:
+  - type: add_tokens
+    dim: D
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_D_3
+  name: Placeholder_NPD_D_3
+  dim: D
+  effects:
+  - type: add_tokens
+    dim: D
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_D_4
+  name: Placeholder_NPD_D_4
+  dim: D
+  effects:
+  - type: add_tokens
+    dim: D
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_V_1
+  name: Placeholder_NPD_V_1
+  dim: V
+  effects:
+  - type: add_tokens
+    dim: V
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_V_2
+  name: Placeholder_NPD_V_2
+  dim: V
+  effects:
+  - type: add_tokens
+    dim: V
+    n: 1
+  weight: 1
+- id: WTP Analysis
+  name: WTP Analysis
+  dim: V
+  effects:
+  - type: add_tokens
+    dim: V
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_V_4
+  name: Placeholder_NPD_V_4
+  dim: V
+  effects:
+  - type: add_tokens
+    dim: V
+    n: 1
+  weight: 1
+- id: Solution Architecture
+  name: Solution Architecture
+  dim: F
+  effects:
+  - type: add_tokens
+    dim: F
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_F_2
+  name: Placeholder_NPD_F_2
+  dim: F
+  effects:
+  - type: add_tokens
+    dim: F
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_F_3
+  name: Placeholder_NPD_F_3
+  dim: F
+  effects:
+  - type: add_tokens
+    dim: F
+    n: 1
+  weight: 1
+- id: Placeholder_NPD_F_4
+  name: Placeholder_NPD_F_4
+  dim: F
+  effects:
+  - type: add_tokens
+    dim: F
+    n: 1
+  weight: 1

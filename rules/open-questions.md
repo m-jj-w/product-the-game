@@ -32,13 +32,17 @@ description text is given anywhere in the document.
 **Provisional choice:** `data/roles.yaml` entries have `id` and `name` only;
 no `flavor` field is populated.
 
-## 4. Skills for Engineer and Data & ML Engineer roles
+## 4. Skills for Engineer and Data & ML Engineer roles (resolved)
 
-Rules §12 explicitly flags this as an open item: "Complete card lists for
+Rules §12 explicitly flagged this as an open item: "Complete card lists for
 all decks, including Skills for the Engineer and Data & ML Engineer roles."
 
-**Provisional choice:** not inventing placeholder skills. Those two roles
-currently have zero eligible Skills in `data/skills.yaml`.
+**Resolved via the content pipeline:** real Skills now exist for both --
+`data_mining`, `data_architecture`, `monte_carlo`, and
+`reinforcement_learning` are Data & ML Engineer skills; `scale_operator`
+(shared with PM) covers Engineer, on top of the all-roles Agile
+Methods/Scrum Master pair. Authored directly in the Sheet, synced via
+`tools/sync_content.py`.
 
 ## 5. `role_swap` effect shape
 

@@ -1,98 +1,95 @@
-quadrant: discovery
+quadrant: market_maturity
 cards:
-- id: smoke_testing
-  name: Smoke Testing
-  dim: D
-  effects:
-  - type: add_tokens
-    dim: D
-    n: 1
-  flavor: A cheap way to get signal from noise.
-  weight: 1
-- id: concepting_method
-  name: Concepting
+- id: Placeholder_MM_D_1
+  name: Placeholder_MM_D_1
   dim: D
   effects:
   - type: add_tokens
     dim: D
     n: 1
   weight: 1
-- id: Paper Prototype
-  name: Paper Prototype
+- id: Placeholder_MM_D_2
+  name: Placeholder_MM_D_2
   dim: D
   effects:
   - type: add_tokens
     dim: D
     n: 1
-  flavor: Only applies to Physical Concepts
   weight: 1
-- id: Clickable Prototype
-  name: Clickable Prototype
+- id: Placeholder_MM_D_3
+  name: Placeholder_MM_D_3
   dim: D
   effects:
   - type: add_tokens
     dim: D
     n: 1
-  flavor: Only applies to Digital Concepts
   weight: 1
-- id: TAM Analysis
-  name: TAM Analysis
+- id: Placeholder_MM_D_4
+  name: Placeholder_MM_D_4
+  dim: D
+  effects:
+  - type: add_tokens
+    dim: D
+    n: 1
+  weight: 1
+- id: Placeholder_MM_V_1
+  name: Placeholder_MM_V_1
   dim: V
   effects:
   - type: add_tokens
     dim: V
     n: 1
   weight: 1
-- id: Trend Analysis
-  name: Trend Analysis
+- id: Placeholder_MM_V_2
+  name: Placeholder_MM_V_2
   dim: V
   effects:
   - type: add_tokens
     dim: V
     n: 1
   weight: 1
-- id: Financial Forecasting
-  name: Financial Forecasting
+- id: Placeholder_MM_V_3
+  name: Placeholder_MM_V_3
   dim: V
   effects:
   - type: add_tokens
     dim: V
     n: 1
   weight: 1
-- id: Demand Landscaping
-  name: Demand Landscaping
+- id: Placeholder_MM_V_4
+  name: Placeholder_MM_V_4
   dim: V
   effects:
   - type: add_tokens
     dim: V
     n: 1
   weight: 1
-- id: Technology Roadmaps
-  name: Technology Roadmaps
+- id: Placeholder_MM_F_1
+  name: Placeholder_MM_F_1
   dim: F
   effects:
   - type: add_tokens
     dim: F
     n: 1
   weight: 1
-- id: Placeholder_D_F_2
-  name: Placeholder_D_F_2
+- id: Placeholder_MM_F_2
+  name: Placeholder_MM_F_2
   dim: F
   effects:
   - type: add_tokens
     dim: F
     n: 1
   weight: 1
-- id: Placeholder_D_F_3
-  name: Placeholder_D_F_3
+- id: Placeholder_MM_F_3
+  name: Placeholder_MM_F_3
   dim: F
   effects:
   - type: add_tokens
     dim: F
     n: 1
   weight: 1
-- id: Placeholder_D_F_4
-  name: Placeholder_D_F_4
+- id: Placeholder_MM_F_4
+  name: Placeholder_MM_F_4
   dim: F
   effects:
   - type: add_tokens

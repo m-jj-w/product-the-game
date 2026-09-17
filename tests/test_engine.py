@@ -62,11 +62,13 @@ class TestNewGameSetup:
                 seed=1,
             )
 
-    def test_real_data_dir_currently_lacks_enough_concepts(self) -> None:
-        """Documents a known content gap (rules.md sec 12), not an engine bug."""
+    def test_real_data_dir_can_start_a_game(self) -> None:
+        """rules.md sec 12's content-gap note is stale: the Sheet-authored
+        library (tools/sync_content.py) now has enough Concepts for a real
+        starting Portfolio."""
         data = load_game_data(REAL_DATA_DIR)
-        with pytest.raises(ValueError, match="concepts"):
-            new_game(NewGameConfig(data=data, player_ids=["a"]), seed=1)
+        state = new_game(NewGameConfig(data=data, player_ids=["a", "b", "c"]), seed=1)
+        assert len(state.portfolio) == 5
 
     def test_builds_all_twelve_dvf_sub_decks(self) -> None:
         data = make_game_data()

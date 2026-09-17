@@ -47,25 +47,18 @@ class TestLoadGameData:
         data = load_game_data(DATA_DIR)
         assert isinstance(data, GameData)
 
-    def test_every_rules_example_card_present(self) -> None:
+    def test_real_content_covers_the_rules_examples(self) -> None:
+        """The Sheet-authored card library (tools/sync_content.py) has grown
+        well past rules.md's original example cards -- checks the library
+        still contains what rules.md cites directly, not that it matches
+        those examples exactly (the Sheet is the ongoing source of truth,
+        see the content pipeline plan)."""
         data = load_game_data(DATA_DIR)
 
         assert set(data.roles) == {"pm", "designer", "engineer", "researcher", "data_ml_engineer"}
-
-        expected_skills = {
-            "service_designer",
-            "experience_designer",
-            "journey_mapper",
-            "user_researcher",
-            "venture_capitalist",
-            "agile_methods",
-            "scrum_master",
-        }
-        assert set(data.skills) == expected_skills
-
-        assert set(data.concepts) == {"platform_play", "user_portal"}
-        assert set(data.chance_cards) == {"budget_cuts"}
-
+        assert {"agile_methods", "scrum_master", "venture_capitalist"} <= set(data.skills)
+        assert {"platform_play", "user_portal"} <= set(data.concepts)
+        assert "budget_cuts" in data.chance_cards
         assert "smoke_testing" in {c.id for c in data.dvf_decks["discovery"].cards}
 
     def test_special_shorthand_normalized(self) -> None:

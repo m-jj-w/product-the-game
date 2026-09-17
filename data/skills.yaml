@@ -1,66 +1,179 @@
-# Skill Cards (Yellow) — rules.md §11
-#
-# All 7 example Skills from the rules. Engineer and Data & ML Engineer have
-# no eligible Skills yet — the rules explicitly flag those as unwritten
-# (see rules/open-questions.md #4). Don't invent placeholders for them.
 skills:
-  - id: service_designer
-    name: Service Designer
-    eligible_roles: [designer]
-    effects:
-      - type: buff
-        dim: D
-        n: 1
-        filter: {category: service}
-      - type: buff
-        dim: F
-        n: 1
-        filter: {category: service}
-
-  - id: experience_designer
-    name: Experience Designer
-    eligible_roles: [designer]
-    effects:
-      - type: buff
-        dim: D
-        n: 1
-        filter: {medium: digital}
-
-  - id: journey_mapper
-    name: Journey Mapper
-    eligible_roles: [designer]
-    effects:
-      - type: buff
-        dim: D
-        n: 1
-      - type: buff
-        dim: F
-        n: 1
-
-  - id: user_researcher
-    name: User Researcher
-    eligible_roles: [designer, researcher]
-    effects:
-      - type: buff
-        dim: D
-        n: 1
-
-  - id: venture_capitalist
-    name: Venture Capitalist
-    eligible_roles: [pm]
-    effects:
-      - type: buff
-        dim: V
-        n: 1
-
-  - id: agile_methods
-    name: Agile Methods
-    eligible_roles: [pm, designer, engineer, researcher, data_ml_engineer]
-    effects:
-      - special: agile_methods
-
-  - id: scrum_master
-    name: Scrum Master
-    eligible_roles: [pm, designer, engineer, researcher, data_ml_engineer]
-    effects:
-      - special: scrum_master
+- id: service_design
+  name: Service Design
+  eligible_roles:
+  - designer
+  effects:
+  - type: buff
+    dim: D
+    n: 1
+    filter:
+      category: service
+  - type: buff
+    dim: F
+    n: 1
+    filter:
+      category: service
+  weight: 1
+- id: experience_design
+  name: Experience Design
+  eligible_roles:
+  - designer
+  effects:
+  - type: buff
+    dim: D
+    n: 1
+    filter:
+      medium: digital
+  weight: 1
+- id: journey_mapping
+  name: Journey Mapping
+  eligible_roles:
+  - designer
+  effects:
+  - type: buff
+    dim: D
+    n: 1
+  - type: buff
+    dim: F
+    n: 1
+  weight: 1
+- id: ethno_research
+  name: Ethnographic Research
+  eligible_roles:
+  - designer
+  - researcher
+  effects:
+  - type: buff
+    dim: D
+    n: 1
+  weight: 1
+- id: venture_capitalist
+  name: Venture Capitalist
+  eligible_roles:
+  - pm
+  effects:
+  - type: buff
+    dim: V
+    n: 1
+  weight: 1
+- id: agile_methods
+  name: Agile Methods
+  eligible_roles:
+  - pm
+  - designer
+  - engineer
+  - researcher
+  - data_ml_engineer
+  effects:
+  - type: special
+    handler: agile_methods
+  weight: 1
+- id: scrum_master
+  name: Scrum Master
+  eligible_roles:
+  - pm
+  - designer
+  - engineer
+  - researcher
+  - data_ml_engineer
+  effects:
+  - type: special
+    handler: scrum_master
+  weight: 1
+- id: consensus_modeling
+  name: Consensus Modeling
+  eligible_roles:
+  - researcher
+  effects:
+  - type: buff
+    dim: V
+    n: 1
+  weight: 1
+- id: future_back
+  name: Future Back
+  eligible_roles:
+  - researcher
+  effects:
+  - type: buff
+    dim: V
+    n: 2
+  - type: buff
+    dim: F
+    n: 1
+  - type: buff
+    dim: D
+    n: -1
+  weight: 1
+- id: reinforcement_learning
+  name: Reinforcement Learning
+  eligible_roles:
+  - data_ml_engineer
+  effects:
+  - type: buff
+    dim: F
+    n: 2
+  weight: 1
+- id: monte_carlo
+  name: Monte Carlo
+  eligible_roles:
+  - data_ml_engineer
+  effects:
+  - type: buff
+    dim: F
+    n: 1
+  weight: 1
+- id: data_mining
+  name: Data Mining
+  eligible_roles:
+  - data_ml_engineer
+  - researcher
+  effects:
+  - type: buff
+    dim: F
+    n: 1
+  weight: 1
+- id: data_architecture
+  name: Data Architecture
+  eligible_roles:
+  - data_ml_engineer
+  effects:
+  - type: buff
+    dim: F
+    n: 1
+  weight: 1
+- id: compelling_storyteller
+  name: Compelling Storyteller
+  eligible_roles:
+  - pm
+  - researcher
+  effects:
+  - type: buff
+    dim: V
+    n: 1
+  - type: buff
+    dim: F
+    n: 1
+  - type: buff
+    dim: D
+    n: 1
+  weight: 1
+- id: scale_operator
+  name: Scale Operator
+  eligible_roles:
+  - pm
+  - engineer
+  effects:
+  - type: buff
+    dim: F
+    n: 2
+  weight: 1
+- id: figma_pro
+  name: Figma Pro
+  eligible_roles:
+  - designer
+  effects:
+  - type: buff
+    dim: D
+    n: 1
+  weight: 1

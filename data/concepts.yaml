@@ -1,27 +1,74 @@
-# Concept Cards (Purple) — rules.md §11
-#
-# TAM is stored in $B units (5.0 == $5B), matching the $1B win-threshold unit.
 concepts:
-  - id: platform_play
-    name: Platform Play
-    flavor: "A two-sided network; twice the work, twice the fun."
-    tam: 5.0
-    medium: [digital]
-    categories: [product, service, experience]
-    modifiers:
-      - type: modify_requirement
-        dim: all
-        op: multiply
-        value: 2
-
-  - id: user_portal
-    name: User Portal
-    flavor: "The cake is a lie."
-    tam: 0.5
-    medium: [digital]
-    categories: [experience]
-    modifiers:
-      - type: modify_requirement
-        dim: D
-        op: add
-        value: 1
+- id: platform_play
+  name: Platform Play
+  tam: 5.0
+  medium:
+  - digital
+  categories:
+  - product
+  - service
+  - experience
+  modifiers:
+  - type: modify_requirement
+    dim: all
+    op: multiply
+    value: 2
+  flavor: A two-sided network; twice the work, twice the fun.
+- id: user_portal
+  name: User Portal
+  tam: 0.5
+  medium:
+  - digital
+  categories:
+  - experience
+  modifiers:
+  - type: modify_requirement
+    dim: D
+    op: add
+    value: 1
+  flavor: The cake is a lie.
+- id: wearable_device
+  name: Wearable Device
+  tam: 1.0
+  medium:
+  - physical
+  categories:
+  - product
+  modifiers: []
+- id: workflow_automation
+  name: Workflow Automation
+  tam: 2.0
+  medium:
+  - digital
+  categories:
+  - service
+  modifiers: []
+- id: immersive_experience
+  name: Immersive Experience
+  tam: 0.75
+  medium:
+  - physical
+  categories:
+  - experience
+  modifiers: []
+- id: augmented_reality
+  name: Augmented Reality
+  tam: 0.75
+  medium:
+  - physical
+  - digital
+  categories:
+  - experience
+  modifiers: []
+- id: pet_project
+  name: Pet Project
+  tam: 0.5
+  medium:
+  - physical
+  - digital
+  categories:
+  - product
+  - service
+  - experience
+  modifiers: []
+  flavor: The CEO thinks this a great idea...
