@@ -127,6 +127,14 @@ def test_index_page_served(client) -> None:
     assert "Product: The Game" in response.text
 
 
+def test_index_page_is_never_cached(client) -> None:
+    # The whole app is this one file with no cache-busted filenames --
+    # a stale cached copy after a deploy would look like updates never
+    # shipped (see the browser-caching issue this test guards against).
+    response = client.get("/")
+    assert response.headers["cache-control"] == "no-store"
+
+
 class TestBoard:
     def test_returns_four_quadrants_in_order_with_full_layout(self, client) -> None:
         response = client.get("/board")

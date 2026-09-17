@@ -245,7 +245,10 @@ def _load_record(store: GameStore, game_id: str) -> GameRecord:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # No caching: this is the whole app (inline CSS/JS, no cache-busted
+    # asset filenames), so a stale cached copy after a deploy would look
+    # like the update never shipped.
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/board", response_model=BoardView)
