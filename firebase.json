@@ -1,0 +1,15 @@
+{
+  "hosting": {
+    "target": "product-the-game",
+    "public": "public",
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "product-the-game",
+          "region": "us-east1"
+        }
+      }
+    ]
+  }
+}

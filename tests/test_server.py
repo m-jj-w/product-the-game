@@ -1,8 +1,8 @@
 """Tests for server/app.py: the hot-seat web API.
 
-Uses FastAPI's TestClient (no real network) with `get_game_data`
-overridden to the synthetic fixture, so these don't depend on the real
-data/ dir's current content gaps.
+Uses FastAPI's TestClient (no real network) -- tests/conftest.py
+overrides get_game_data/get_game_store with fakes, so these don't
+depend on the real data/ dir's current content or on Firestore.
 """
 
 from __future__ import annotations
@@ -14,15 +14,6 @@ from fastapi.testclient import TestClient
 
 from server.app import app, get_game_data
 from tests.fixtures import make_game_data
-
-DATA = make_game_data(concept_count=8)
-
-
-@pytest.fixture(autouse=True)
-def _override_data():
-    app.dependency_overrides[get_game_data] = lambda: DATA
-    yield
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture

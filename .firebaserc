@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "mjjw-ai-projects"
+  },
+  "targets": {
+    "mjjw-ai-projects": {
+      "hosting": {
+        "product-the-game": [
+          "product-the-game-mjjw"
+        ]
+      }
+    }
+  }
+}

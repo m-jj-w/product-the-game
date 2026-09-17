@@ -4,6 +4,7 @@ Points run_game_loop() at a real fastapi.testclient.TestClient -- no real
 network or process -- since it satisfies the same .get/.post shape a real
 httpx.Client would. No real Anthropic API calls either: agent seats use a
 scripted fake client, same pattern as tests/test_llm_agent.py.
+tests/conftest.py overrides get_game_data/get_game_store with fakes.
 """
 
 from __future__ import annotations
@@ -13,17 +14,7 @@ from fastapi.testclient import TestClient
 
 from agents.llm_agent import ActionChoice
 from cli.game_loop import SeatConfig, run_game_loop
-from server.app import app, get_game_data
-from tests.fixtures import make_game_data
-
-DATA = make_game_data(concept_count=8)
-
-
-@pytest.fixture(autouse=True)
-def _override_data():
-    app.dependency_overrides[get_game_data] = lambda: DATA
-    yield
-    app.dependency_overrides.clear()
+from server.app import app
 
 
 @pytest.fixture
