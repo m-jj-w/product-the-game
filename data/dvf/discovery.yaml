@@ -24,6 +24,8 @@ cards:
   - type: add_tokens
     dim: D
     n: 1
+    filter:
+      medium: physical
   flavor: Only applies to Physical Concepts
   weight: 1
 - id: Clickable Prototype
@@ -33,6 +35,8 @@ cards:
   - type: add_tokens
     dim: D
     n: 1
+    filter:
+      medium: digital
   flavor: Only applies to Digital Concepts
   weight: 1
 - id: TAM Analysis
