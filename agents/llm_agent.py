@@ -37,6 +37,7 @@ from engine.rules import (
     MoveConcept,
     Outcome,
     RemoveConcept,
+    ResearchBreakthrough,
     RoleSwap,
 )
 from engine.state import GameState
@@ -81,6 +82,11 @@ def describe_action(action: Action, state: GameState) -> str:
         return f"Delegate the rest of this turn to {action.recipient_id} (Scrum Master)"
     if isinstance(action, RoleSwap):
         return f"Swap roles between {action.player_a_id} and {action.player_b_id}"
+    if isinstance(action, ResearchBreakthrough):
+        card = state.data.concepts[action.concept_id]
+        return (
+            f"Research Breakthrough: top up '{card.name}'s {action.dim} toward the next Milestone"
+        )
     raise TypeError(f"no description for action type: {type(action)!r}")
 
 

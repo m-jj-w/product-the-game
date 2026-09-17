@@ -22,6 +22,7 @@ from engine.rules import (
     MoveConcept,
     Outcome,
     RemoveConcept,
+    ResearchBreakthrough,
     RoleSwap,
     apply,
     is_over,
@@ -51,6 +52,7 @@ __all__ = [
     "NewGameConfig",
     "Outcome",
     "RemoveConcept",
+    "ResearchBreakthrough",
     "RoleSwap",
     "apply",
     "current_decision",
@@ -170,6 +172,9 @@ def current_decision(state: GameState) -> Decision | None:
     elif state.pending_chance_removal:
         kind = "chance_removal"
         owner = next(p.id for p in state.players if p.role_id == "pm")
+    elif state.pending_research_breakthrough:
+        kind = "research_breakthrough"
+        owner = next(p.id for p in state.players if p.role_id == "pm")
     elif state.in_close_phase:
         kind = "close"
         owner = next(p.id for p in state.players if p.role_id == "pm")
@@ -214,10 +219,16 @@ def observe(state: GameState, player_id: str) -> str:
         )
     elif state.pending_chance_removal:
         lines.append("Pending: Chance card -- team (PM) must choose a Concept to remove")
+    elif state.pending_research_breakthrough:
+        lines.append(
+            "Pending: Research Breakthrough -- team (PM) must choose a Concept and a "
+            "dimension (D/V/F) to top up toward the next Milestone"
+        )
     elif state.in_close_phase:
         deck = state.concept_deck
         lines.append(
-            f"Close phase (PM decides): remove/draw Concepts or end_close -- "
+            f"Close phase (PM decides): remove/draw Concepts (capacity "
+            f"{len(state.portfolio)}/{state.portfolio_capacity}) or end_close -- "
             f"concept deck has {len(deck.draw_pile)} in draw pile, "
             f"{len(deck.discard_pile)} in discard"
         )

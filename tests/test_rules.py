@@ -15,6 +15,7 @@ from engine.rules import (
     GiveSkill,
     MoveConcept,
     RemoveConcept,
+    ResearchBreakthrough,
     RoleSwap,
     apply,
     is_over,
@@ -72,6 +73,12 @@ def _state(
     role_swap_used=False,
     role_swap_forfeited=False,
     rng_seed=0,
+    portfolio_capacity=5,
+    pending_extra_turn=False,
+    pending_double_next_turn=False,
+    pending_skip_close=False,
+    pending_research_breakthrough=False,
+    pending_concept_to_add=None,
 ) -> GameState:
     return GameState(
         data=DATA,
@@ -94,6 +101,12 @@ def _state(
         role_swap_used=role_swap_used,
         role_swap_forfeited=role_swap_forfeited,
         pending_chance_removal=pending_chance_removal,
+        portfolio_capacity=portfolio_capacity,
+        pending_extra_turn=pending_extra_turn,
+        pending_double_next_turn=pending_double_next_turn,
+        pending_skip_close=pending_skip_close,
+        pending_research_breakthrough=pending_research_breakthrough,
+        pending_concept_to_add=pending_concept_to_add,
     )
 
 
@@ -571,6 +584,245 @@ class TestChance:
         )
         with pytest.raises(ValueError, match="no Chance cards defined"):
             apply(state, MoveConcept("concept_0", "forward"))
+
+
+class TestChanceSpecials:
+    """Chance-card-triggered mechanics beyond remove_concept/add_tokens --
+    see rules/open-questions.md #14-18 for each one's provisional shape."""
+
+    def test_sick_day_ends_turn_with_no_close_phase(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_sick_day",)),
+            turn=3,
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.in_close_phase is False
+        assert result.pending_skip_close is False
+        assert result.turn == 4
+        assert result.turn_owner_index == 1
+        assert result.active_player_index == 1
+        assert result.pending_roll is not None
+
+    def test_productivity_grants_bonus_cycle_to_current_owner(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_productivity",)),
+            turn=3,
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.in_close_phase is True
+        assert result.pending_extra_turn is True
+
+        result = apply(result, EndClose())
+        assert result.agile_bonus_pending is True
+        assert result.turn == 3  # bonus cycle -- turn hasn't advanced yet
+        assert result.turn_owner_index == 0
+        assert result.active_player_index == 0
+        assert result.pending_extra_turn is False
+
+    def test_retrospective_queues_bonus_for_next_owner_not_current(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_retrospective",)),
+            turn=3,
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.pending_double_next_turn is True
+
+        result = apply(result, EndClose())
+        # the current owner's own turn just ends normally -- no bonus for them
+        assert result.agile_bonus_pending is False
+        assert result.turn == 4
+        assert result.turn_owner_index == 1
+        assert result.pending_double_next_turn is False
+        assert result.pending_extra_turn is True  # carried forward to the new owner
+
+    def test_retrospective_bonus_actually_fires_for_the_next_owner(self) -> None:
+        # p2 (index 1) is turn owner with a bonus already queued (e.g. from a
+        # prior Retrospective card, reconstructed directly here).
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_bonus",)),
+            turn=4,
+            active_player_index=1,
+            turn_owner_index=1,
+            pending_extra_turn=True,
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        result = apply(result, EndClose())
+        assert result.agile_bonus_pending is True
+        assert result.turn == 4  # bonus cycle -- doesn't advance
+        assert result.turn_owner_index == 1
+        assert result.active_player_index == 1
+        assert result.pending_extra_turn is False
+
+
+class TestPortfolioCapacity:
+    def test_expand_portfolio_raises_capacity(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_expand",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.portfolio_capacity == 6
+        assert result.in_close_phase is True
+
+    def test_narrow_portfolio_under_capacity_resolves_immediately(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_narrow",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.portfolio_capacity == 4
+        assert result.pending_chance_removal is False
+        assert result.in_close_phase is True
+
+    def test_narrow_portfolio_over_capacity_forces_discard(self) -> None:
+        state = _state(
+            portfolio=[_concept(card_id=f"concept_{i}", offset=0) for i in range(5)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_narrow",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.portfolio_capacity == 4
+        assert result.pending_chance_removal is True
+        assert result.in_close_phase is False
+        assert len(result.portfolio) == 5  # not yet discarded
+
+        result = apply(result, ChanceRemoveConcept("concept_4"))
+        assert len(result.portfolio) == 4
+        assert result.pending_chance_removal is False
+        assert result.in_close_phase is True
+
+    def test_narrow_portfolio_floors_at_one(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_narrow",)),
+            portfolio_capacity=1,
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.portfolio_capacity == 1
+
+    def test_draw_concept_respects_expanded_capacity(self) -> None:
+        state = _state(
+            portfolio=[_concept(card_id=f"concept_{i}", offset=0) for i in range(5)],
+            in_close_phase=True,
+            portfolio_capacity=6,
+            concept_deck=Deck(draw_pile=("concept_9",)),
+        )
+        assert DrawConcept() in legal_actions(state)
+        result = apply(state, DrawConcept())
+        assert len(result.portfolio) == 6
+
+
+class TestResearchBreakthrough:
+    def test_pauses_for_team_choice(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_research_breakthrough",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.pending_research_breakthrough is True
+        assert result.in_close_phase is False
+        assert set(legal_actions(result)) == {
+            ResearchBreakthrough("concept_0", "D"),
+            ResearchBreakthrough("concept_0", "V"),
+            ResearchBreakthrough("concept_0", "F"),
+        }
+
+    def test_tops_up_to_the_quadrant_requirement(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0, tokens=DVFTokens(D=1))],
+            pending_research_breakthrough=True,
+        )
+        result = apply(state, ResearchBreakthrough("concept_0", "D"))
+        assert result.portfolio[0].tokens.D == 3  # discovery's D requirement (fixtures.make_board)
+        assert result.pending_research_breakthrough is False
+        assert result.in_close_phase is True
+
+    def test_no_op_when_already_at_or_above_requirement(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0, tokens=DVFTokens(D=5))],
+            pending_research_breakthrough=True,
+        )
+        result = apply(state, ResearchBreakthrough("concept_0", "D"))
+        assert result.portfolio[0].tokens.D == 5  # unchanged, already above requirement
+
+    def test_raises_without_a_pending_decision(self) -> None:
+        state = _state(portfolio=[_concept(offset=0)], pending_roll=3)
+        with pytest.raises(ValueError, match="no pending Research Breakthrough"):
+            apply(state, ResearchBreakthrough("concept_0", "D"))
+
+
+class TestFetchConcept:
+    def test_fetches_from_draw_pile_when_room_in_portfolio(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_fetch",)),
+            concept_deck=Deck(draw_pile=("concept_5", "concept_1")),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert {c.card_id for c in result.portfolio} == {"concept_0", "concept_5"}
+        assert result.concept_deck.draw_pile == ("concept_1",)
+        assert result.in_close_phase is True
+        assert result.pending_chance_removal is False
+
+    def test_fetches_from_discard_pile(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_fetch",)),
+            concept_deck=Deck(draw_pile=(), discard_pile=("concept_5",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert {c.card_id for c in result.portfolio} == {"concept_0", "concept_5"}
+        assert result.concept_deck.discard_pile == ()
+
+    def test_fizzles_when_target_not_in_either_pile(self) -> None:
+        state = _state(
+            portfolio=[_concept(offset=0)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_fetch",)),
+            concept_deck=Deck(draw_pile=("concept_1",)),  # concept_5 not present
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert {c.card_id for c in result.portfolio} == {"concept_0"}
+        assert result.concept_deck.draw_pile == ("concept_1",)
+        assert result.in_close_phase is True
+
+    def test_forces_discard_first_when_portfolio_full(self) -> None:
+        state = _state(
+            portfolio=[_concept(card_id=f"concept_{i}", offset=0) for i in range(5)],
+            pending_roll=5,
+            chance_deck=Deck(draw_pile=("test_fetch",)),
+            concept_deck=Deck(draw_pile=("concept_5",)),
+        )
+        result = apply(state, MoveConcept("concept_0", "forward"))
+        assert result.pending_chance_removal is True
+        assert result.pending_concept_to_add == "concept_5"
+        assert len(result.portfolio) == 5  # not added yet
+        assert result.in_close_phase is False
+
+        result = apply(result, ChanceRemoveConcept("concept_4"))
+        assert {c.card_id for c in result.portfolio} == {
+            "concept_0",
+            "concept_1",
+            "concept_2",
+            "concept_3",
+            "concept_5",
+        }
+        assert result.pending_concept_to_add is None
+        assert result.in_close_phase is True
 
 
 class TestAgileMethods:

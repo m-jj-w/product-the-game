@@ -103,6 +103,23 @@ class GameState:
     pending_chance_removal: bool = False
     role_swap_used: bool = False
     role_swap_forfeited: bool = False
+    portfolio_capacity: int = 5
+    """Max active Concepts (min is a hardcoded 1). Chance cards like
+    Expanded/Narrowed Scope adjust this instead of the schema's fixed 5."""
+    pending_extra_turn: bool = False
+    """Productivity: the current turn owner gets one bonus cycle, via the
+    same mechanism as the Agile Methods Skill (see `_end_turn`)."""
+    pending_double_next_turn: bool = False
+    """Retrospective: queues a bonus cycle for whoever becomes turn owner
+    *next*, converted to `pending_extra_turn` when that rotation happens."""
+    pending_skip_close: bool = False
+    """Sick Day: skip this turn's Close phase and end the turn immediately."""
+    pending_research_breakthrough: bool = False
+    """Awaiting the team's concept+dim choice for a Research Breakthrough
+    Chance card's token top-up."""
+    pending_concept_to_add: str | None = None
+    """Fetch Concept (e.g. Pet Project): a Concept id waiting to be added
+    to the Portfolio once a forced discard (Portfolio was full) resolves."""
 
     @property
     def active_player(self) -> Player:

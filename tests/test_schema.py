@@ -96,6 +96,16 @@ class TestUnknownEffectType:
         assert effect.type == "special"
         assert effect.handler == "agile_methods"
 
+    def test_special_effect_target_defaults_to_none(self) -> None:
+        effect = parse_effect({"type": "special", "handler": "agile_methods"})
+        assert effect.target is None
+
+    def test_special_effect_target_parsed(self) -> None:
+        effect = parse_effect(
+            {"type": "special", "handler": "fetch_concept", "target": "platform_play"}
+        )
+        assert effect.target == "platform_play"
+
 
 class TestCardWeight:
     """`weight` controls draw commonality (see the deck-construction plan);
@@ -219,6 +229,58 @@ class TestUnknownRoleReference:
         )
         with pytest.raises(SchemaError, match="unknown role"):
             load_game_data(tmp_path)
+
+
+class TestFetchConceptTarget:
+    def test_missing_target_rejected(self, tmp_path: Path) -> None:
+        _write_data_dir(
+            tmp_path,
+            chance_override=[
+                {
+                    "id": "test_fetch",
+                    "name": "Test Fetch",
+                    "effects": [{"type": "special", "handler": "fetch_concept"}],
+                }
+            ],
+        )
+        with pytest.raises(SchemaError, match="needs a target"):
+            load_game_data(tmp_path)
+
+    def test_unknown_target_rejected(self, tmp_path: Path) -> None:
+        _write_data_dir(
+            tmp_path,
+            chance_override=[
+                {
+                    "id": "test_fetch",
+                    "name": "Test Fetch",
+                    "effects": [
+                        {
+                            "type": "special",
+                            "handler": "fetch_concept",
+                            "target": "not_a_real_concept",
+                        }
+                    ],
+                }
+            ],
+        )
+        with pytest.raises(SchemaError, match="not a known concept"):
+            load_game_data(tmp_path)
+
+    def test_valid_target_loads(self, tmp_path: Path) -> None:
+        _write_data_dir(
+            tmp_path,
+            chance_override=[
+                {
+                    "id": "test_fetch",
+                    "name": "Test Fetch",
+                    "effects": [
+                        {"type": "special", "handler": "fetch_concept", "target": "platform_play"}
+                    ],
+                }
+            ],
+        )
+        data = load_game_data(tmp_path)
+        assert "test_fetch" in data.chance_cards
 
 
 class TestBoardValidation:

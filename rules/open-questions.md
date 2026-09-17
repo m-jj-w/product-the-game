@@ -168,3 +168,68 @@ yet, so there's no concrete example to design the syntax against.
 `draw_concept`, `move_concept`, `role_swap`, and `special`. A Chance card
 needing `role_conditional` will need this revisited first — don't guess
 at a nested syntax with nothing real to validate it against.
+
+## 14. Sick Day: "skip the current player's turn"
+
+The card is drawn mid-move (the landing Concept already moved to trigger
+the Chance draw), so a literal "the turn never happened" reading doesn't
+fit the sequence of events.
+
+**Provisional choice:** read as "skip this turn's Close phase and end
+the turn immediately" — the Move/Draw that already happened stands, but
+there's no team decision-making afterward. Implemented via
+`GameState.pending_skip_close`, checked in `_enter_close_phase`.
+
+## 15. Productivity / Retrospective: reusing the Agile Methods bonus cycle
+
+Both cards grant a "go again" turn (Productivity for the current player,
+Retrospective for the *next* one) with no other stated mechanical
+difference from Agile Methods' "two complete turns count as one"
+(rules.md sec 10).
+
+**Provisional choice:** implemented as one-shot triggers into the exact
+same bonus-cycle machinery Agile Methods uses (`GameState.
+pending_extra_turn` for Productivity, consumed in `_end_turn` the same
+way `_holds_special(..., "agile_methods")` is; `pending_double_next_turn`
+for Retrospective, carried across the next rotation and converted to
+`pending_extra_turn` for the new turn owner). If a turn owner somehow
+holds Agile Methods *and* has a Chance-card bonus queued the same turn,
+only one bonus cycle is granted (the fields aren't additive) — not
+expected to come up, since Agile Methods already grants a bonus every
+turn its holder has it.
+
+## 16. Portfolio capacity bounds (Expanded/Narrowed Scope)
+
+CLAUDE.md's "Portfolio holds 1 to 5 active Concepts" is stated as a fixed
+rule; these two cards make the upper bound variable per-game.
+
+**Provisional choice:** `GameState.portfolio_capacity` starts at 5 and is
+only adjusted by these two cards. Narrowed Scope floors it at 1 (can
+never force zero capacity); no ceiling on Expanded Scope, since the rules
+don't state one. The absolute minimum of 1 active Concept (loss
+condition if it hits 0) is unrelated and stays hardcoded.
+
+## 17. Research Breakthrough: token top-up scope
+
+"Add as many tokens as necessary... to achieve the next Milestone" could
+mean topping up to the base requirement only, or accounting for the
+team's current Skill buffs too (which `qualifies()` already factors in
+for an actual Milestone crossing).
+
+**Provisional choice:** tops up to the *base* `required_dvf()` value
+only, ignoring Skill buffs — simpler, and a real crossing attempt still
+adds buffs on top via the normal `qualifies()` check. All `(Concept,
+dim)` pairs are offered as options even when the gain would be 0 (dim
+already met); a rational team won't pick a no-op.
+
+## 18. Fetch Concept (e.g. Pet Project): target not found
+
+If the target Concept id isn't in `concept_deck.draw_pile` or
+`discard_pile` (e.g. it's already active in the Portfolio, or was
+already fetched earlier in the same game), the card has nothing to do.
+
+**Provisional choice:** fizzles silently — the Chance card is still
+discarded as used, but no Concept is added. Not expected to come up in
+practice (each such Concept exists once), but handled rather than
+raising, since "the target happens to already be on the board" is a
+legitimate game state, not a data error.

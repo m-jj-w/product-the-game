@@ -173,8 +173,9 @@ def make_dvf_decks(*, cards_per_dim: int = 2) -> dict[str, DvfDeck]:
 
 
 def make_chance_cards() -> dict[str, ChanceCard]:
-    """One plain effect (direct-apply path) and one team-choice removal
-    (Budget Cuts' shape -- the only kind rules.md's example data has)."""
+    """One plain effect (direct-apply path), one team-choice removal
+    (Budget Cuts' shape -- the only kind rules.md's example data has), and
+    one per Chance-triggered special handler."""
     return {
         "test_bonus": ChanceCard(
             id="test_bonus",
@@ -185,6 +186,41 @@ def make_chance_cards() -> dict[str, ChanceCard]:
             id="test_removal",
             name="Test Removal",
             effects=[{"type": "remove_concept", "chooser": "team"}],
+        ),
+        "test_sick_day": ChanceCard(
+            id="test_sick_day",
+            name="Test Sick Day",
+            effects=[{"type": "special", "handler": "sick_day"}],
+        ),
+        "test_productivity": ChanceCard(
+            id="test_productivity",
+            name="Test Productivity",
+            effects=[{"type": "special", "handler": "productivity"}],
+        ),
+        "test_retrospective": ChanceCard(
+            id="test_retrospective",
+            name="Test Retrospective",
+            effects=[{"type": "special", "handler": "retrospective"}],
+        ),
+        "test_expand": ChanceCard(
+            id="test_expand",
+            name="Test Expand",
+            effects=[{"type": "special", "handler": "expand_portfolio"}],
+        ),
+        "test_narrow": ChanceCard(
+            id="test_narrow",
+            name="Test Narrow",
+            effects=[{"type": "special", "handler": "narrow_portfolio"}],
+        ),
+        "test_research_breakthrough": ChanceCard(
+            id="test_research_breakthrough",
+            name="Test Research Breakthrough",
+            effects=[{"type": "special", "handler": "research_breakthrough"}],
+        ),
+        "test_fetch": ChanceCard(
+            id="test_fetch",
+            name="Test Fetch",
+            effects=[{"type": "special", "handler": "fetch_concept", "target": "concept_5"}],
         ),
     }
 

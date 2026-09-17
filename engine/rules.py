@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from engine.effects import apply_effects
-from engine.modifiers import compute_skill_buffs, qualifies
+from engine.modifiers import compute_skill_buffs, qualifies, required_dvf
 from engine.schema import ChanceCard, Quadrant
 from engine.state import (
     BoardPosition,
@@ -106,6 +106,16 @@ class RoleSwap:
     player_b_id: str
 
 
+@dataclass(frozen=True)
+class ResearchBreakthrough:
+    """Research Breakthrough (Chance): top up one Concept's chosen
+    dimension to whatever the next Milestone in its current quadrant
+    requires."""
+
+    concept_id: str
+    dim: Literal["D", "V", "F"]
+
+
 Action = (
     MoveConcept
     | CrossMilestone
@@ -117,12 +127,15 @@ Action = (
     | ChanceRemoveConcept
     | DelegateTurn
     | RoleSwap
+    | ResearchBreakthrough
 )
 
 
 @dataclass(frozen=True)
 class Decision:
-    kind: Literal["move", "cross_milestone", "close", "skill", "chance_removal"]
+    kind: Literal[
+        "move", "cross_milestone", "close", "skill", "chance_removal", "research_breakthrough"
+    ]
     owner: str
     actions: tuple[Action, ...]
 
@@ -209,11 +222,15 @@ def legal_actions(state: GameState) -> list[Action]:
         return actions + _scrum_master_options(state)
     if state.pending_chance_removal:
         return [ChanceRemoveConcept(c.card_id) for c in state.portfolio]
+    if state.pending_research_breakthrough:
+        return [
+            ResearchBreakthrough(c.card_id, dim) for c in state.portfolio for dim in ("D", "V", "F")
+        ]
     if state.in_close_phase:
         actions = []
         if len(state.portfolio) > 1:
             actions.extend(RemoveConcept(c.card_id) for c in state.portfolio)
-        if len(state.portfolio) < 5 and _deck_has_cards(state.concept_deck):
+        if len(state.portfolio) < state.portfolio_capacity and _deck_has_cards(state.concept_deck):
             actions.append(DrawConcept())
         if _role_swap_offered(state):
             actions.extend(
@@ -240,9 +257,14 @@ def _roll_die(rng_state: tuple) -> tuple[int, tuple]:
 
 def _end_turn(state: GameState) -> GameState:
     """Finalize a resolved move/cross/close/give: stop if the game just
-    ended. Otherwise, either grant the turn owner's Agile Methods bonus
-    cycle (rules.md sec 10: two complete turns count as one), or actually
-    conclude the turn -- advance turn/turn_owner_index, roll the next die.
+    ended. Otherwise, either grant the turn owner a bonus cycle (rules.md
+    sec 10: two complete turns count as one) -- from Agile Methods or a
+    Productivity/Retrospective Chance card, indistinguishable once
+    queued -- or actually conclude the turn: advance turn/turn_owner_index,
+    roll the next die. A Retrospective-queued bonus for the *next* owner
+    (`pending_double_next_turn`) is carried forward and converted to
+    `pending_extra_turn` on the new owner, so it fires on their own
+    `_end_turn` rather than this one.
 
     Rotation always keys off `turn_owner_index`, not `active_player_index`:
     a Scrum Master delegation mid-turn only reassigns who's deciding, so
@@ -252,7 +274,9 @@ def _end_turn(state: GameState) -> GameState:
     if is_over(state) is not None:
         return state
 
-    if not state.agile_bonus_pending and _holds_special(state, state.turn_owner, "agile_methods"):
+    if not state.agile_bonus_pending and (
+        _holds_special(state, state.turn_owner, "agile_methods") or state.pending_extra_turn
+    ):
         value, new_rng_state = _roll_die(state.rng_state)
         return dataclasses.replace(
             state,
@@ -261,6 +285,7 @@ def _end_turn(state: GameState) -> GameState:
             pending_roll=value,
             pending_cross=None,
             agile_bonus_pending=True,
+            pending_extra_turn=False,
         )
 
     value, new_rng_state = _roll_die(state.rng_state)
@@ -274,6 +299,8 @@ def _end_turn(state: GameState) -> GameState:
         pending_roll=value,
         pending_cross=None,
         agile_bonus_pending=False,
+        pending_extra_turn=state.pending_double_next_turn,
+        pending_double_next_turn=False,
     )
 
 
@@ -378,13 +405,74 @@ def _draw_chance_card(state: GameState) -> tuple[ChanceCard, GameState]:
     return state.data.chance_cards[card_id], state
 
 
+def _fetch_concept_from_deck(deck: Deck, target_id: str) -> tuple[bool, Deck]:
+    """Search both piles for one specific Concept id (Fetch Concept's Chance
+    effect), rather than `_draw_from_deck`'s usual random top-of-pile draw.
+    A previously-removed target sits in `discard_pile`, not `draw_pile`."""
+    if target_id in deck.draw_pile:
+        new_pile = tuple(cid for cid in deck.draw_pile if cid != target_id)
+        return True, dataclasses.replace(deck, draw_pile=new_pile)
+    if target_id in deck.discard_pile:
+        new_discard = tuple(cid for cid in deck.discard_pile if cid != target_id)
+        return True, dataclasses.replace(deck, discard_pile=new_discard)
+    return False, deck
+
+
+def _add_concept_to_portfolio(state: GameState, card_id: str) -> GameState:
+    new_instance = ConceptInstance(
+        card_id=card_id, position=BoardPosition(entry_quadrant_id(state.data), 0)
+    )
+    return dataclasses.replace(state, portfolio=state.portfolio + (new_instance,))
+
+
+def _apply_chance_special(state: GameState, handler: str, target: str | None) -> GameState:
+    """Chance-card-triggered mechanics that change turn/Portfolio state
+    directly rather than buffing the landing Concept -- see
+    rules/open-questions.md for each one's provisional semantics. None of
+    these cards combine a special effect with anything else (same
+    assumption `_resolve_chance_card` already makes for remove_concept)."""
+    if handler == "sick_day":
+        return dataclasses.replace(state, pending_skip_close=True)
+    if handler == "productivity":
+        return dataclasses.replace(state, pending_extra_turn=True)
+    if handler == "retrospective":
+        return dataclasses.replace(state, pending_double_next_turn=True)
+    if handler == "expand_portfolio":
+        return dataclasses.replace(state, portfolio_capacity=state.portfolio_capacity + 1)
+    if handler == "narrow_portfolio":
+        new_capacity = max(1, state.portfolio_capacity - 1)
+        state = dataclasses.replace(state, portfolio_capacity=new_capacity)
+        if len(state.portfolio) > new_capacity:
+            return dataclasses.replace(state, pending_chance_removal=True)
+        return state
+    if handler == "research_breakthrough":
+        return dataclasses.replace(state, pending_research_breakthrough=True)
+    if handler == "fetch_concept":
+        assert target is not None  # schema's cross-reference check guarantees this
+        found, new_deck = _fetch_concept_from_deck(state.concept_deck, target)
+        state = dataclasses.replace(state, concept_deck=new_deck)
+        if not found:
+            return state  # already active, or somehow not in either pile -- fizzles
+        if len(state.portfolio) >= state.portfolio_capacity:
+            return dataclasses.replace(
+                state, pending_chance_removal=True, pending_concept_to_add=target
+            )
+        return _add_concept_to_portfolio(state, target)
+    raise ValueError(f"unknown Chance special handler '{handler}'")
+
+
 def _resolve_chance_card(state: GameState, concept_id: str, card: ChanceCard) -> GameState:
     """rules.md sec 8.2: a Chance card affects the landing Concept unless
     it says otherwise. `remove_concept` always says otherwise -- the
     schema only allows `chooser: "team"`, so it always pauses for the
-    team's choice of target instead of a direct apply."""
+    team's choice of target instead of a direct apply. A `special` effect
+    likewise bypasses `apply_effects` (engine/effects.py doesn't handle it)
+    and goes through its own dispatch."""
     if any(effect.type == "remove_concept" for effect in card.effects):
         return dataclasses.replace(state, pending_chance_removal=True)
+    for effect in card.effects:
+        if effect.type == "special":
+            return _apply_chance_special(state, effect.handler, effect.target)
     return apply_effects(state, concept_id, card.effects)
 
 
@@ -424,6 +512,10 @@ def _enter_close_phase(state: GameState) -> GameState:
         return state
     if state.pending_chance_removal:
         return state
+    if state.pending_research_breakthrough:
+        return state
+    if state.pending_skip_close:
+        return _end_turn(dataclasses.replace(state, pending_skip_close=False))
     return dataclasses.replace(state, in_close_phase=True)
 
 
@@ -450,6 +542,8 @@ def apply(state: GameState, action: Action) -> GameState:
         return _apply_delegate_turn(state, action)
     if isinstance(action, RoleSwap):
         return _apply_role_swap(state, action)
+    if isinstance(action, ResearchBreakthrough):
+        return _apply_research_breakthrough(state, action)
     raise TypeError(f"unknown action type: {type(action)!r}")
 
 
@@ -492,6 +586,12 @@ def _apply_chance_remove_concept(state: GameState, action: ChanceRemoveConcept) 
     state = dataclasses.replace(
         state, portfolio=new_portfolio, concept_deck=new_deck, pending_chance_removal=False
     )
+    # Fetch Concept's forced-discard-then-add sequence: this discard may
+    # have been to make room, in which case the fetched concept still
+    # needs to land in the Portfolio.
+    if state.pending_concept_to_add is not None:
+        state = _add_concept_to_portfolio(state, state.pending_concept_to_add)
+        state = dataclasses.replace(state, pending_concept_to_add=None)
     # No minimum-1 floor here (unlike Close-phase RemoveConcept): rules.md
     # sec 2 explicitly allows Budget Cuts to remove the last Concept and
     # end the game -- _enter_close_phase's is_over check handles that.
@@ -549,22 +649,29 @@ def _apply_remove_concept(state: GameState, action: RemoveConcept) -> GameState:
 
 def _apply_draw_concept(state: GameState) -> GameState:
     _require_close_phase(state)
-    if len(state.portfolio) >= 5:
-        raise ValueError("Portfolio already has 5 active Concepts")
+    if len(state.portfolio) >= state.portfolio_capacity:
+        raise ValueError(f"Portfolio already has {state.portfolio_capacity} active Concepts")
     try:
         card_id, new_deck, new_rng_state = _draw_from_deck(state.concept_deck, state.rng_state)
     except ValueError as exc:
         raise ValueError("no Concepts left to draw") from exc
-    new_instance = ConceptInstance(
-        card_id=card_id,
-        position=BoardPosition(entry_quadrant_id(state.data), 0),
-    )
-    return dataclasses.replace(
-        state,
-        portfolio=state.portfolio + (new_instance,),
-        concept_deck=new_deck,
-        rng_state=new_rng_state,
-    )
+    state = dataclasses.replace(state, concept_deck=new_deck, rng_state=new_rng_state)
+    return _add_concept_to_portfolio(state, card_id)
+
+
+def _apply_research_breakthrough(state: GameState, action: ResearchBreakthrough) -> GameState:
+    if not state.pending_research_breakthrough:
+        raise ValueError("no pending Research Breakthrough decision")
+    instance = get_concept(state, action.concept_id)
+    card = state.data.concepts[instance.card_id]
+    quadrant = _quadrant_by_id(state, instance.position.quadrant_id)
+    required = required_dvf(card, quadrant)
+    have = getattr(instance.tokens, action.dim)
+    gain = max(0, getattr(required, action.dim) - have)
+    new_tokens = dataclasses.replace(instance.tokens, **{action.dim: have + gain})
+    state = with_concept(state, dataclasses.replace(instance, tokens=new_tokens))
+    state = dataclasses.replace(state, pending_research_breakthrough=False)
+    return _enter_close_phase(state)
 
 
 def _apply_end_close(state: GameState) -> GameState:

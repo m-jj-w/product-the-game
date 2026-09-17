@@ -31,6 +31,7 @@ from engine.rules import (
     GiveSkill,
     MoveConcept,
     RemoveConcept,
+    ResearchBreakthrough,
     RoleSwap,
 )
 from engine.state import BoardPosition, ConceptInstance, GameState, Player
@@ -103,6 +104,10 @@ class TestDescribeAction:
     def test_role_swap(self) -> None:
         desc = describe_action(RoleSwap("alice", "bob"), _state())
         assert "alice" in desc and "bob" in desc
+
+    def test_research_breakthrough(self) -> None:
+        desc = describe_action(ResearchBreakthrough("concept_0", "D"), _state())
+        assert "Research Breakthrough" in desc and "Test Concept 0" in desc and "D" in desc
 
 
 class _FakeResponse:

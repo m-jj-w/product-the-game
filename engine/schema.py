@@ -20,7 +20,17 @@ Medium = Literal["digital", "physical"]
 Category = Literal["product", "service", "experience"]
 SpaceType = Literal["D", "V", "F", "skills", "chance"]
 
-KNOWN_SPECIAL_HANDLERS = {"agile_methods", "scrum_master"}
+KNOWN_SPECIAL_HANDLERS = {
+    "agile_methods",
+    "scrum_master",
+    "sick_day",
+    "productivity",
+    "retrospective",
+    "expand_portfolio",
+    "narrow_portfolio",
+    "research_breakthrough",
+    "fetch_concept",
+}
 
 
 class SchemaError(Exception):
@@ -127,6 +137,10 @@ class SpecialEffect(BaseModel):
 
     type: Literal["special"] = "special"
     handler: str
+    target: str | None = None
+    """A card id the handler acts on, e.g. `fetch_concept`'s target
+    Concept -- keeps the handler itself content-agnostic (CLAUDE.md
+    principle #2: engine code must not mention specific card names)."""
 
     @field_validator("handler")
     @classmethod
@@ -409,6 +423,15 @@ def _validate_cross_references(data: GameData) -> None:
 
     for card in data.chance_cards.values():
         _check_effects(card.effects, role_ids, f"chance card '{card.id}'")
+        for effect in card.effects:
+            if isinstance(effect, SpecialEffect) and effect.handler == "fetch_concept":
+                if effect.target is None:
+                    raise SchemaError(f"chance card '{card.id}': fetch_concept needs a target")
+                if effect.target not in data.concepts:
+                    raise SchemaError(
+                        f"chance card '{card.id}': fetch_concept target "
+                        f"'{effect.target}' is not a known concept"
+                    )
 
     for deck in data.dvf_decks.values():
         if deck.quadrant not in quadrant_ids:

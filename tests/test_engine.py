@@ -184,3 +184,27 @@ class TestClosePhaseDecisionOwnership:
         assert decision is not None
         assert decision.kind == "close"
         assert decision.owner == "bob"  # ...but Close phase decisions belong to the PM
+
+    def test_research_breakthrough_decision_is_owned_by_pm(self) -> None:
+        data = make_game_data()
+        players = (
+            Player(id="alice", role_id="designer"),
+            Player(id="bob", role_id="pm"),
+        )
+        state = GameState(
+            data=data,
+            turn=0,
+            active_player_index=0,
+            turn_owner_index=0,
+            players=players,
+            portfolio=(
+                ConceptInstance(card_id="concept_0", position=BoardPosition("discovery", 0)),
+            ),
+            bank=0.0,
+            rng_state=random.Random(0).getstate(),
+            pending_research_breakthrough=True,
+        )
+        decision = current_decision(state)
+        assert decision is not None
+        assert decision.kind == "research_breakthrough"
+        assert decision.owner == "bob"
