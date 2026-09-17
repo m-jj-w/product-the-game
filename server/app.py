@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agents.llm_agent import describe_action
+from agents.llm_agent import SPACE_LABELS, describe_action
 from engine.engine import (
     NewGameConfig,
     apply,
@@ -33,8 +33,9 @@ from engine.engine import (
     new_game,
     observe,
 )
+from engine.rules import Action, CrossMilestone, MoveConcept
 from engine.schema import GameData, load_game_data
-from engine.state import GameState
+from engine.state import GameState, get_concept
 from server.auth import BasicAuthMiddleware
 from server.store import FirestoreGameStore, GameRecord, GameStore, InMemoryGameStore, replay
 
@@ -111,9 +112,24 @@ class GameView(BaseModel):
     decision_owner: str | None
     options: list[ActionOption]
     outcome: OutcomeView | None
+    last_event: str | None = None
 
 
-def _build_view(game_id: str, state: GameState, seed: int) -> GameView:
+class QuadrantView(BaseModel):
+    id: str
+    name: str
+    order: int
+    spaces: list[str]
+    milestone_name: str
+
+
+class BoardView(BaseModel):
+    quadrants: list[QuadrantView]
+
+
+def _build_view(
+    game_id: str, state: GameState, seed: int, last_event: str | None = None
+) -> GameView:
     decision = current_decision(state)
     outcome = is_over(state)
 
@@ -158,7 +174,66 @@ def _build_view(game_id: str, state: GameState, seed: int) -> GameView:
         decision_owner=decision.owner if decision is not None else None,
         options=options,
         outcome=OutcomeView(result=outcome.result, reason=outcome.reason) if outcome else None,
+        last_event=last_event,
     )
+
+
+def _narrate(old_state: GameState, new_state: GameState, action: Action) -> str:
+    """A past-tense line describing what `action` just did -- for the web
+    UI's rolling activity log (GameView.last_event). Falls back to the
+    action's own (already past-tense-ish) description for anything not
+    specially handled below."""
+    if isinstance(action, MoveConcept):
+        instance = get_concept(new_state, action.concept_id)
+        card = new_state.data.concepts[instance.card_id]
+        if instance.position.offset == 0:
+            return f"{card.name} landed on the Gateway."
+
+        quadrant = new_state.data.board.quadrant(instance.position.quadrant_id)
+        space_type = quadrant.spaces[instance.position.offset - 1]
+        label = SPACE_LABELS[space_type]
+
+        if space_type in ("D", "V", "F"):
+            deck = new_state.dvf_sub_decks[(quadrant.id, space_type)]
+            drawn_id = deck.discard_pile[-1]
+            drawn_name = next(
+                c.name for c in new_state.data.dvf_decks[quadrant.id].cards if c.id == drawn_id
+            )
+            return f"{card.name} landed on a {label} space and drew '{drawn_name}'!"
+
+        if space_type == "chance":
+            drawn_id = new_state.chance_deck.discard_pile[-1]
+            drawn_name = new_state.data.chance_cards[drawn_id].name
+            return f"{card.name} landed on a {label} space and drew '{drawn_name}'!"
+
+        # skills: drawn for the active player, not the Concept itself
+        if new_state.pending_skill is not None:
+            skill_name = new_state.data.skills[new_state.pending_skill].name
+            return f"{card.name} landed on a {label} space -- drew '{skill_name}' (not eligible)."
+        old_skills = {p.id: p.skill_id for p in old_state.players}
+        newly_skilled = next(
+            (p for p in new_state.players if p.skill_id and p.skill_id != old_skills.get(p.id)),
+            None,
+        )
+        if newly_skilled is not None:
+            skill_name = new_state.data.skills[newly_skilled.skill_id].name
+            return (
+                f"{card.name} landed on a {label} space -- {newly_skilled.id} drew '{skill_name}'!"
+            )
+        return f"{card.name} landed on a {label} space."
+
+    if isinstance(action, CrossMilestone):
+        card = new_state.data.concepts[action.concept_id]
+        if not action.cross:
+            return f"{card.name} declined to cross the Milestone."
+        still_active = any(c.card_id == action.concept_id for c in new_state.portfolio)
+        if not still_active:
+            return f"{card.name} reached Finish and banked ${card.tam:.2f}B!"
+        instance = get_concept(new_state, action.concept_id)
+        quadrant = new_state.data.board.quadrant(instance.position.quadrant_id)
+        return f"{card.name} crossed into {quadrant.name}!"
+
+    return describe_action(action, old_state)
 
 
 def _load_record(store: GameStore, game_id: str) -> GameRecord:
@@ -171,6 +246,25 @@ def _load_record(store: GameStore, game_id: str) -> GameRecord:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/board", response_model=BoardView)
+def get_board(data: GameData = Depends(get_game_data)) -> BoardView:
+    """The board layout -- static for the life of a game, fetched once by
+    the client rather than repeated in every GameView."""
+    quadrants = sorted(data.board.quadrants, key=lambda q: q.order)
+    return BoardView(
+        quadrants=[
+            QuadrantView(
+                id=q.id,
+                name=q.name,
+                order=q.order,
+                spaces=list(q.spaces),
+                milestone_name=q.milestone.name,
+            )
+            for q in quadrants
+        ]
+    )
 
 
 @app.post("/games", response_model=GameView)
@@ -221,11 +315,13 @@ def choose_action(
             detail=f"action_index must be between 0 and {len(actions) - 1}",
         )
 
-    new_state = apply(state, actions[req.action_index])
+    chosen_action = actions[req.action_index]
+    new_state = apply(state, chosen_action)
     new_record = GameRecord(
         player_ids=record.player_ids,
         seed=record.seed,
         action_indices=[*record.action_indices, req.action_index],
     )
     store.save(game_id, new_record)
-    return _build_view(game_id, new_state, record.seed)
+    last_event = _narrate(state, new_state, chosen_action)
+    return _build_view(game_id, new_state, record.seed, last_event=last_event)

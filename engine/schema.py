@@ -379,6 +379,12 @@ class Board(BaseModel):
             raise ValueError(f"quadrant orders must be exactly 1-4, got {orders}")
         return quadrants
 
+    def quadrant(self, quadrant_id: str) -> Quadrant:
+        for q in self.quadrants:
+            if q.id == quadrant_id:
+                return q
+        raise KeyError(f"unknown quadrant '{quadrant_id}'")
+
 
 # --- loader -------------------------------------------------------------
 

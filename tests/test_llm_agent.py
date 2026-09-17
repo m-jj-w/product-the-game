@@ -6,6 +6,7 @@ stubbing `.messages.parse()`.
 
 from __future__ import annotations
 
+import dataclasses
 import random
 import re
 
@@ -35,13 +36,18 @@ from engine.rules import (
     ResearchBreakthrough,
     RoleSwap,
 )
-from engine.state import BoardPosition, ConceptInstance, GameState, Player
+from engine.state import BoardPosition, ConceptInstance, DVFTokens, GameState, PendingCross, Player
 from tests.fixtures import make_game_data
 
 DATA = make_game_data()
 
 
-def _state(pending_skill: str | None = None) -> GameState:
+def _state(
+    pending_skill: str | None = None,
+    pending_roll: int | None = None,
+    concept_0_offset: int = 1,
+    concept_0_tokens: DVFTokens | None = None,
+) -> GameState:
     return GameState(
         data=DATA,
         turn=0,
@@ -49,12 +55,17 @@ def _state(pending_skill: str | None = None) -> GameState:
         turn_owner_index=0,
         players=(Player(id="alice", role_id="pm"), Player(id="bob", role_id="designer")),
         portfolio=(
-            ConceptInstance(card_id="concept_0", position=BoardPosition("discovery", 1)),
+            ConceptInstance(
+                card_id="concept_0",
+                position=BoardPosition("discovery", concept_0_offset),
+                tokens=concept_0_tokens or DVFTokens(),
+            ),
             ConceptInstance(card_id="concept_1", position=BoardPosition("discovery", 1)),
         ),
         bank=0.0,
         rng_state=random.Random(0).getstate(),
         pending_skill=pending_skill,
+        pending_roll=pending_roll,
     )
 
 
@@ -64,12 +75,58 @@ class TestDescribeAction:
         desc = describe_action(MoveConcept("concept_0", "forward"), state)
         assert "Test Concept 0" in desc and "forward" in desc
 
+    def test_move_concept_previews_landing_space(self) -> None:
+        # fixtures' board: _SPACES = ["D","V","F","skills","chance"] * 3.
+        # offset 1 + roll 2 (forward) = offset 3 = spaces[2] = "F".
+        state = _state(pending_roll=2)
+        desc = describe_action(MoveConcept("concept_0", "forward"), state)
+        assert "to a Feasibility space" in desc
+
+    def test_move_concept_preview_omitted_without_a_pending_roll(self) -> None:
+        # matches the pre-preview behavior when there's nothing to preview
+        state = _state(pending_roll=None)
+        desc = describe_action(MoveConcept("concept_0", "forward"), state)
+        assert desc == "Move 'Test Concept 0' forward"
+
+    def test_move_concept_non_qualifying_wrap_previews_the_gateway(self) -> None:
+        state = _state(pending_roll=1, concept_0_offset=15)  # raw=16, reaches the Gateway
+        desc = describe_action(MoveConcept("concept_0", "forward"), state)
+        assert desc.endswith("to the Gateway")
+
+    def test_move_concept_qualifying_wrap_previews_crossing(self) -> None:
+        # discovery's requirement (fixtures.make_board): D=3 V=2 F=1
+        state = _state(
+            pending_roll=1, concept_0_offset=15, concept_0_tokens=DVFTokens(D=3, V=2, F=1)
+        )
+        desc = describe_action(MoveConcept("concept_0", "forward"), state)
+        assert "would qualify to cross the Milestone" in desc
+
     def test_cross_milestone_accept_and_decline(self) -> None:
         state = _state()
         accept = describe_action(CrossMilestone("concept_0", True), state)
         decline = describe_action(CrossMilestone("concept_0", False), state)
         assert "Cross" in accept
         assert "Decline" in decline
+
+    def test_cross_milestone_previews_destination_quadrant(self) -> None:
+        state = dataclasses.replace(
+            _state(),
+            pending_cross=PendingCross(
+                concept_id="concept_0", same_quadrant_offset=0, next_quadrant_id="npd"
+            ),
+        )
+        desc = describe_action(CrossMilestone("concept_0", True), state)
+        assert "into New Product Development" in desc
+
+    def test_cross_milestone_previews_finish_and_bank_amount(self) -> None:
+        state = dataclasses.replace(
+            _state(),
+            pending_cross=PendingCross(
+                concept_id="concept_0", same_quadrant_offset=0, next_quadrant_id=None
+            ),
+        )
+        desc = describe_action(CrossMilestone("concept_0", True), state)
+        assert "bank" in desc and "$" in desc
 
     def test_remove_concept(self) -> None:
         state = _state()

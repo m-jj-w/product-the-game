@@ -12,6 +12,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from agents.llm_agent import SPACE_LABELS
 from server.app import app, get_game_data
 from tests.fixtures import make_game_data
 
@@ -124,3 +125,50 @@ def test_index_page_served(client) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Product: The Game" in response.text
+
+
+class TestBoard:
+    def test_returns_four_quadrants_in_order_with_full_layout(self, client) -> None:
+        response = client.get("/board")
+        assert response.status_code == 200
+        body = response.json()
+        assert [q["order"] for q in body["quadrants"]] == [1, 2, 3, 4]
+        assert [q["id"] for q in body["quadrants"]] == [
+            "discovery",
+            "npd",
+            "scaling",
+            "market_maturity",
+        ]
+        for q in body["quadrants"]:
+            assert len(q["spaces"]) == 15
+            assert q["milestone_name"]
+
+
+class TestLastEvent:
+    def test_none_on_create_and_on_plain_get(self, client) -> None:
+        view = _new_game(client)
+        assert view["last_event"] is None
+        fetched = client.get(f"/games/{view['game_id']}").json()
+        assert fetched["last_event"] is None
+
+    def test_move_reports_landing_space_and_drawn_card(self, client) -> None:
+        # fixtures' board: spaces = ["D","V","F","skills","chance"] * 3.
+        # Every concept starts at offset 0, so a first roll (1-6) always
+        # lands within the first 6 -- no gateway-wrap edge case here.
+        view = _new_game(client, ("alice", "bob"), seed=5)
+        roll = int(re.search(r"Rolled: (\d+)", view["observation"]).group(1))
+        space_type = (["D", "V", "F", "skills", "chance"] * 3)[roll - 1]
+        concept_name = view["portfolio"][0]["name"]  # matches option 0 (forward)
+
+        result = client.post(f"/games/{view['game_id']}/actions", json={"action_index": 0})
+        assert result.status_code == 200
+        event = result.json()["last_event"]
+
+        assert event is not None
+        assert concept_name in event
+        if space_type in ("D", "V", "F"):
+            assert SPACE_LABELS[space_type] in event and "drew" in event
+        elif space_type == "chance":
+            assert "Chance" in event and "drew" in event
+        else:
+            assert "Skills" in event

@@ -72,6 +72,30 @@
   .outcome.loss { background: #f8d7d7; color: #7a1414; }
   #error { color: #b30000; font-size: 0.9rem; min-height: 1.2em; }
   #game { display: none; }
+
+  #board { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0 1rem; }
+  .quadrantBoard { flex: 1 1 200px; max-width: 240px; text-align: center; }
+  .quadrantBoard svg { width: 100%; height: auto; }
+  .quadrantBoard .quadrantLabel { font-size: 0.8rem; font-weight: 600; margin-top: 0.25rem; }
+  .quadrantBoard .milestoneLabel { font-size: 0.75rem; color: #888; }
+  #boardLegend {
+    display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; font-size: 0.78rem; margin: 0.25rem 0 1rem;
+  }
+  #boardLegend span { display: inline-flex; align-items: center; gap: 0.3rem; }
+  #boardLegend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  #activityLog {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    background: rgba(127, 127, 127, 0.06);
+    font-size: 0.85rem;
+  }
+  #activityLog .activityLine { padding: 0.15rem 0; border-bottom: 1px dotted var(--border); }
+  #activityLog .activityLine:last-child { border-bottom: none; }
+  #activityLog .empty { color: #888; font-style: italic; }
 </style>
 </head>
 <body>
@@ -89,6 +113,10 @@
 
     <div id="outcomeBanner"></div>
 
+    <h2>Board</h2>
+    <div id="boardLegend"></div>
+    <div id="board"></div>
+
     <h2>Players</h2>
     <table id="playersTable"><thead>
       <tr><th>Player</th><th>Role</th><th>Skill</th></tr>
@@ -99,6 +127,9 @@
       <tr><th>Concept</th><th>Quadrant</th><th>Offset</th><th>D</th><th>V</th><th>F</th></tr>
     </thead><tbody></tbody></table>
 
+    <h2>Activity</h2>
+    <div id="activityLog"><div class="empty">Nothing has happened yet.</div></div>
+
     <h2>State</h2>
     <pre id="observation"></pre>
 
@@ -108,6 +139,25 @@
 
 <script>
 let gameId = null;
+let boardData = null;
+let activityLog = [];
+
+const SPACE_COLORS = {
+  gateway: '#999999',
+  D: '#4f8ef7',
+  V: '#f7a94f',
+  F: '#4fc97a',
+  skills: '#b06ff7',
+  chance: '#f75f6f',
+};
+const SPACE_LABELS = {
+  gateway: 'Gateway',
+  D: 'Desirability',
+  V: 'Viability',
+  F: 'Feasibility',
+  skills: 'Skills',
+  chance: 'Chance',
+};
 
 function showError(message) {
   document.getElementById('error').textContent = message || '';
@@ -122,11 +172,122 @@ async function api(path, options) {
   return body;
 }
 
-function render(view) {
+async function loadBoard() {
+  if (boardData) return boardData;
+  boardData = await api('/board');
+  renderBoardLegend();
+  return boardData;
+}
+
+function renderBoardLegend() {
+  const el = document.getElementById('boardLegend');
+  el.innerHTML = '';
+  for (const key of ['gateway', 'D', 'V', 'F', 'skills', 'chance']) {
+    const span = document.createElement('span');
+    span.innerHTML = `<i style="background:${SPACE_COLORS[key]}"></i>${SPACE_LABELS[key]}`;
+    el.appendChild(span);
+  }
+}
+
+function nodePoint(i, total, cx, cy, r) {
+  const angle = (i / total) * 2 * Math.PI - Math.PI / 2;
+  return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+}
+
+function renderBoard(view) {
+  const container = document.getElementById('board');
+  container.innerHTML = '';
+  if (!boardData) return;
+
+  const size = 200;
+  const cx = size / 2;
+  const cy = size / 2;
+  const trackR = 78;
+  const markerR = 58;
+  const total = 16; // Gateway (offset 0) + 15 coded spaces
+
+  for (const quadrant of boardData.quadrants) {
+    const svgParts = [
+      `<circle cx="${cx}" cy="${cy}" r="${trackR}" fill="none" stroke="var(--border)" stroke-width="1" />`,
+    ];
+
+    for (let i = 0; i < total; i++) {
+      const [x, y] = nodePoint(i, total, cx, cy, trackR);
+      const type = i === 0 ? 'gateway' : quadrant.spaces[i - 1];
+      const color = SPACE_COLORS[type] || '#999';
+      const r = i === 0 ? 7 : 5.5;
+      svgParts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="${color}" />`);
+    }
+
+    const here = view.portfolio.filter((c) => c.quadrant === quadrant.id);
+    const byOffset = {};
+    for (const c of here) {
+      (byOffset[c.offset] = byOffset[c.offset] || []).push(c);
+    }
+    for (const [offsetStr, concepts] of Object.entries(byOffset)) {
+      const offset = Number(offsetStr);
+      const [bx, by] = nodePoint(offset, total, cx, cy, markerR);
+      concepts.forEach((c, idx) => {
+        const spread = (idx - (concepts.length - 1) / 2) * 12;
+        const angle = Math.atan2(by - cy, bx - cx) + Math.PI / 2;
+        const mx = bx + Math.cos(angle) * spread;
+        const my = by + Math.sin(angle) * spread;
+        const initials = c.name
+          .split(/\s+/)
+          .map((w) => w[0])
+          .join('')
+          .slice(0, 2)
+          .toUpperCase();
+        svgParts.push(
+          `<g><circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="9" fill="var(--accent)" ` +
+            `stroke="var(--bg)" stroke-width="1.5"><title>${c.name}</title></circle>` +
+            `<text x="${mx.toFixed(1)}" y="${(my + 3).toFixed(1)}" font-size="8" ` +
+            `text-anchor="middle" fill="#fff">${initials}</text></g>`
+        );
+      });
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'quadrantBoard';
+    wrapper.innerHTML =
+      `<svg viewBox="0 0 ${size} ${size}">${svgParts.join('')}</svg>` +
+      `<div class="quadrantLabel">${quadrant.name}</div>` +
+      `<div class="milestoneLabel">${quadrant.milestone_name}</div>`;
+    container.appendChild(wrapper);
+  }
+}
+
+function pushEvent(text) {
+  if (!text) return;
+  activityLog.unshift(text);
+  if (activityLog.length > 50) activityLog.length = 50;
+  renderActivityLog();
+}
+
+function renderActivityLog() {
+  const el = document.getElementById('activityLog');
+  el.innerHTML = '';
+  if (activityLog.length === 0) {
+    el.innerHTML = '<div class="empty">Nothing has happened yet.</div>';
+    return;
+  }
+  for (const line of activityLog) {
+    const div = document.createElement('div');
+    div.className = 'activityLine';
+    div.textContent = line;
+    el.appendChild(div);
+  }
+}
+
+async function render(view) {
   gameId = view.game_id;
   document.getElementById('game').style.display = 'block';
   document.getElementById('metaLine').textContent =
     `Game ${view.game_id.slice(0, 8)} · seed ${view.seed} · turn ${view.turn} of 50 · TAM bank $${view.bank.toFixed(2)}B`;
+
+  await loadBoard();
+  renderBoard(view);
+  pushEvent(view.last_event);
 
   const playersBody = document.querySelector('#playersTable tbody');
   playersBody.innerHTML = '';
@@ -186,7 +347,7 @@ async function chooseAction(index) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action_index: index }),
     });
-    render(view);
+    await render(view);
   } catch (err) {
     showError(err.message);
     buttons.forEach((b) => (b.disabled = false));
@@ -210,7 +371,8 @@ document.getElementById('newGameForm').addEventListener('submit', async (event) 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    render(view);
+    activityLog = [];
+    await render(view);
   } catch (err) {
     showError(err.message);
   }

@@ -198,7 +198,10 @@ def observe(state: GameState, player_id: str) -> str:
             f"to {state.active_player.id})"
         )
     if state.agile_bonus_pending:
-        lines.append(f"(Agile Methods: {state.turn_owner.id}'s bonus second cycle)")
+        # Shared by Agile Methods and the Productivity/Retrospective Chance
+        # cards (engine/rules.py's _end_turn) -- not always actually Agile
+        # Methods, so the message stays mechanic-agnostic.
+        lines.append(f"(Bonus cycle: {state.turn_owner.id}'s second cycle this turn)")
     for c in state.portfolio:
         card = state.data.concepts[c.card_id]
         lines.append(

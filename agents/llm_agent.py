@@ -24,7 +24,9 @@ from typing import Any
 from pydantic import BaseModel
 
 from engine.engine import NewGameConfig, apply, current_decision, is_over, new_game, observe
+from engine.modifiers import compute_skill_buffs, qualifies
 from engine.rules import (
+    LOOP_SIZE,
     Action,
     ChanceRemoveConcept,
     CrossMilestone,
@@ -40,10 +42,18 @@ from engine.rules import (
     ResearchBreakthrough,
     RoleSwap,
 )
-from engine.state import GameState
+from engine.state import GameState, get_concept
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.md"
 DEFAULT_MODEL = "claude-opus-5"
+
+SPACE_LABELS = {
+    "D": "Desirability",
+    "V": "Viability",
+    "F": "Feasibility",
+    "skills": "Skills",
+    "chance": "Chance",
+}
 
 
 class ActionChoice(BaseModel):
@@ -53,15 +63,45 @@ class ActionChoice(BaseModel):
     rationale: str
 
 
+def _landing_preview(state: GameState, action: MoveConcept) -> str:
+    """What Moving `action.concept_id` `action.direction` would land it on,
+    from the already-known pending_roll -- same math _apply_move() uses
+    (engine/rules.py), just previewed rather than applied."""
+    instance = get_concept(state, action.concept_id)
+    card = state.data.concepts[instance.card_id]
+    quadrant = state.data.board.quadrant(instance.position.quadrant_id)
+    n = state.pending_roll
+    offset = instance.position.offset
+    raw = offset + n if action.direction == "forward" else offset - n
+    reaches_gateway = action.direction == "forward" and raw >= LOOP_SIZE
+
+    if reaches_gateway and qualifies(instance, card, quadrant, compute_skill_buffs(state, card)):
+        return "to the Gateway (would qualify to cross the Milestone!)"
+
+    new_offset = raw % LOOP_SIZE
+    if new_offset == 0:
+        return "to the Gateway"
+    label = SPACE_LABELS[quadrant.spaces[new_offset - 1]]
+    return f"to a {label} space"
+
+
 def describe_action(action: Action, state: GameState) -> str:
     """Human-readable text for one legal Action, resolving ids to names."""
     if isinstance(action, MoveConcept):
         card = state.data.concepts[action.concept_id]
-        return f"Move '{card.name}' {action.direction}"
+        preview = f" {_landing_preview(state, action)}" if state.pending_roll is not None else ""
+        return f"Move '{card.name}' {action.direction}{preview}"
     if isinstance(action, CrossMilestone):
         card = state.data.concepts[action.concept_id]
-        verb = "Cross the Milestone with" if action.cross else "Decline crossing for"
-        return f"{verb} '{card.name}'"
+        if not action.cross:
+            return f"Decline crossing for '{card.name}'"
+        pending = state.pending_cross
+        if pending is not None and pending.next_quadrant_id is None:
+            return f"Cross the Milestone with '{card.name}' and bank ${card.tam:.2f}B!"
+        if pending is not None:
+            next_name = state.data.board.quadrant(pending.next_quadrant_id).name
+            return f"Cross the Milestone with '{card.name}' into {next_name}"
+        return f"Cross the Milestone with '{card.name}'"
     if isinstance(action, RemoveConcept):
         card = state.data.concepts[action.concept_id]
         return f"Remove '{card.name}' from the Portfolio"

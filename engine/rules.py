@@ -157,10 +157,7 @@ def is_over(state: GameState) -> Outcome | None:
 
 
 def _quadrant_by_id(state: GameState, quadrant_id: str) -> Quadrant:
-    for q in state.data.board.quadrants:
-        if q.id == quadrant_id:
-            return q
-    raise KeyError(f"unknown quadrant '{quadrant_id}'")
+    return state.data.board.quadrant(quadrant_id)
 
 
 def _deck_has_cards(deck: Deck) -> bool:

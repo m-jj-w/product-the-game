@@ -316,6 +316,15 @@ class TestBoardValidation:
         with pytest.raises(ValidationError):
             Board.model_validate({"quadrants": [_minimal_board_kwargs()]})
 
+    def test_quadrant_lookup_by_id(self) -> None:
+        board = load_game_data(DATA_DIR).board
+        assert board.quadrant("discovery").id == "discovery"
+
+    def test_quadrant_lookup_unknown_id_raises(self) -> None:
+        board = load_game_data(DATA_DIR).board
+        with pytest.raises(KeyError, match="mars"):
+            board.quadrant("mars")
+
 
 class TestConceptFilterHypothesis:
     @given(
