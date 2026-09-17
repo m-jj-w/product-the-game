@@ -27,6 +27,14 @@ class TestParseEffect:
     def test_add_tokens(self) -> None:
         assert parse_effect("add_tokens dim=D n=1") == {"type": "add_tokens", "dim": "D", "n": 1}
 
+    def test_add_tokens_with_filter(self) -> None:
+        assert parse_effect("add_tokens dim=D n=1 filter.medium=physical") == {
+            "type": "add_tokens",
+            "dim": "D",
+            "n": 1,
+            "filter": {"medium": "physical"},
+        }
+
     def test_modify_requirement(self) -> None:
         assert parse_effect("modify_requirement dim=all op=multiply value=2") == {
             "type": "modify_requirement",
@@ -110,6 +118,7 @@ class TestSerializeEffectRoundTrip:
         [
             {"type": "add_tokens", "dim": "D", "n": 1},
             {"type": "add_tokens", "dim": "D", "n": -3},
+            {"type": "add_tokens", "dim": "D", "n": 1, "filter": {"medium": "physical"}},
             {"type": "modify_requirement", "dim": "all", "op": "multiply", "value": 2},
             {"type": "buff", "dim": "D", "n": 1, "filter": {"category": "service"}},
             {

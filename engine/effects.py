@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from engine.modifiers import filter_matches
 from engine.schema import AddTokensEffect, Effect
 from engine.state import DVFTokens, GameState, get_concept, with_concept
 
@@ -29,6 +30,9 @@ def apply_effect(state: GameState, concept_id: str, effect: Effect) -> GameState
 
 def _apply_add_tokens(state: GameState, concept_id: str, effect: AddTokensEffect) -> GameState:
     instance = get_concept(state, concept_id)
+    card = state.data.concepts[instance.card_id]
+    if not filter_matches(effect.filter, card):
+        return state  # card is still drawn/discarded as normal -- just no effect here
     delta = DVFTokens(**{effect.dim: effect.n})
     new_instance = dataclasses.replace(instance, tokens=instance.tokens + delta)
     return with_concept(state, new_instance)

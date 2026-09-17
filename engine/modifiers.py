@@ -63,7 +63,10 @@ def qualifies(
     return have.D >= required.D and have.V >= required.V and have.F >= required.F
 
 
-def _filter_matches(concept_filter: ConceptFilter | None, card: Concept) -> bool:
+def filter_matches(concept_filter: ConceptFilter | None, card: Concept) -> bool:
+    """Shared by Skill buffs (below) and DVF/Chance card effects
+    (engine/effects.py) -- a Concept can have multiple mediums/categories,
+    so a filter matches if the one it names is among them."""
     if concept_filter is None:
         return True
     if concept_filter.medium is not None and concept_filter.medium not in card.medium:
@@ -85,6 +88,6 @@ def compute_skill_buffs(state: GameState, card: Concept) -> DVFTokens:
             continue
         skill = state.data.skills[player.skill_id]
         for effect in skill.effects:
-            if effect.type == "buff" and _filter_matches(effect.filter, card):
+            if effect.type == "buff" and filter_matches(effect.filter, card):
                 total = total + DVFTokens(**{effect.dim: effect.n})
     return total

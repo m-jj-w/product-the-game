@@ -56,6 +56,11 @@ class AddTokensEffect(BaseModel):
     type: Literal["add_tokens"] = "add_tokens"
     dim: Dim
     n: int
+    filter: ConceptFilter | None = None
+    """Restricts which landing Concept this actually affects -- e.g. a DVF
+    card that only helps Physical Concepts. The card is still drawn and
+    discarded as normal either way; a non-matching Concept just sees no
+    effect (see engine/effects.py)."""
 
 
 class ModifyRequirementEffect(BaseModel):
