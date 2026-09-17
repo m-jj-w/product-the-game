@@ -18,7 +18,7 @@ def _concept(modifiers: list[dict]) -> Concept:
         id="c",
         name="C",
         tam=1.0,
-        medium="digital",
+        medium=["digital"],
         categories=["product"],
         modifiers=modifiers,
     )
@@ -87,21 +87,31 @@ def _state_with_players(players: list[Player]) -> GameState:
 class TestComputeSkillBuffs:
     def test_no_skills_held_gives_zero(self) -> None:
         state = _state_with_players([Player(id="p1", role_id="pm")])
-        card = Concept(id="c", name="C", tam=1.0, medium="digital", categories=["product"])
+        card = Concept(id="c", name="C", tam=1.0, medium=["digital"], categories=["product"])
         assert compute_skill_buffs(state, card) == DVFTokens()
 
     def test_filtered_buff_only_matches_the_right_concepts(self) -> None:
         # pm_digital_buff (fixtures.make_skills): +2 V to digital Concepts only.
         state = _state_with_players([Player(id="p1", role_id="pm", skill_id="pm_digital_buff")])
-        digital = Concept(id="d", name="D", tam=1.0, medium="digital", categories=["product"])
-        physical = Concept(id="p", name="P", tam=1.0, medium="physical", categories=["product"])
+        digital = Concept(id="d", name="D", tam=1.0, medium=["digital"], categories=["product"])
+        physical = Concept(id="p", name="P", tam=1.0, medium=["physical"], categories=["product"])
         assert compute_skill_buffs(state, digital) == DVFTokens(V=2)
         assert compute_skill_buffs(state, physical) == DVFTokens()
+
+    def test_filtered_buff_matches_a_concept_with_multiple_mediums(self) -> None:
+        # pm_digital_buff filters on medium=digital; a Concept that's both
+        # physical and digital should still match (rules.md: a Concept can
+        # be physical AND/OR digital).
+        state = _state_with_players([Player(id="p1", role_id="pm", skill_id="pm_digital_buff")])
+        both = Concept(
+            id="b", name="B", tam=1.0, medium=["physical", "digital"], categories=["product"]
+        )
+        assert compute_skill_buffs(state, both) == DVFTokens(V=2)
 
     def test_unfiltered_buff_matches_every_concept(self) -> None:
         # all_roles_buff: +1 F, no filter.
         state = _state_with_players([Player(id="p1", role_id="pm", skill_id="all_roles_buff")])
-        card = Concept(id="c", name="C", tam=1.0, medium="physical", categories=["service"])
+        card = Concept(id="c", name="C", tam=1.0, medium=["physical"], categories=["service"])
         assert compute_skill_buffs(state, card) == DVFTokens(F=1)
 
     def test_buffs_stack_across_players(self) -> None:
@@ -111,10 +121,10 @@ class TestComputeSkillBuffs:
                 Player(id="p2", role_id="pm", skill_id="all_roles_buff"),  # +1 F
             ]
         )
-        card = Concept(id="c", name="C", tam=1.0, medium="digital", categories=["product"])
+        card = Concept(id="c", name="C", tam=1.0, medium=["digital"], categories=["product"])
         assert compute_skill_buffs(state, card) == DVFTokens(D=1, F=1)
 
     def test_special_skill_contributes_no_buff(self) -> None:
         state = _state_with_players([Player(id="p1", role_id="pm", skill_id="agile_methods")])
-        card = Concept(id="c", name="C", tam=1.0, medium="digital", categories=["product"])
+        card = Concept(id="c", name="C", tam=1.0, medium=["digital"], categories=["product"])
         assert compute_skill_buffs(state, card) == DVFTokens()

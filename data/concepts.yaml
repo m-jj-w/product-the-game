@@ -6,7 +6,7 @@ concepts:
     name: Platform Play
     flavor: "A two-sided network; twice the work, twice the fun."
     tam: 5.0
-    medium: digital
+    medium: [digital]
     categories: [product, service, experience]
     modifiers:
       - type: modify_requirement
@@ -18,7 +18,7 @@ concepts:
     name: User Portal
     flavor: "The cake is a lie."
     tam: 0.5
-    medium: digital
+    medium: [digital]
     categories: [experience]
     modifiers:
       - type: modify_requirement

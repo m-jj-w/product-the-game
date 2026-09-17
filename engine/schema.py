@@ -244,10 +244,17 @@ class Concept(BaseModel):
     name: str
     flavor: str | None = None
     tam: float = Field(gt=0)
-    medium: Medium
+    medium: list[Medium] = Field(min_length=1)
     categories: list[Category] = Field(min_length=1)
     modifiers: list[AnyEffect] = Field(default_factory=list)
     art: str | None = None
+
+    @field_validator("medium")
+    @classmethod
+    def _unique_mediums(cls, medium: list[Medium]) -> list[Medium]:
+        if len(set(medium)) != len(medium):
+            raise ValueError("medium must be unique")
+        return medium
 
     @field_validator("categories")
     @classmethod

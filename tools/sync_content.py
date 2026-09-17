@@ -173,7 +173,7 @@ def concept_row_to_dict(row: dict[str, str]) -> dict:
         "id": row["id"].strip(),
         "name": row["name"].strip(),
         "tam": float(row["tam"]),
-        "medium": row["medium"].strip(),
+        "medium": parse_list_cell(row.get("medium", "")),
         "categories": parse_list_cell(row.get("categories", "")),
         "modifiers": parse_effects_cell(row.get("modifiers", "")),
     }

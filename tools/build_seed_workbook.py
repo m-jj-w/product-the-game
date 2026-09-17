@@ -67,7 +67,7 @@ def build_workbook(data: GameData) -> Workbook:
                 c.name,
                 c.flavor or "",
                 c.tam,
-                c.medium,
+                ",".join(c.medium),
                 ",".join(c.categories),
                 serialize_effects([m.model_dump(exclude_none=True) for m in c.modifiers]),
                 c.art or "",

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from engine.schema import (
     Board,
+    Concept,
     ConceptFilter,
     EffectAdapter,
     GameData,
@@ -172,6 +173,27 @@ class TestCardWeight:
                         }
                     ]
                 }
+            )
+
+
+class TestConceptMedium:
+    """A Concept can be physical AND/OR digital (rules.md), so `medium` is
+    a list, matching `categories`' shape."""
+
+    def test_multiple_mediums_accepted(self) -> None:
+        concept = Concept(
+            id="c", name="C", tam=1.0, medium=["physical", "digital"], categories=["product"]
+        )
+        assert concept.medium == ["physical", "digital"]
+
+    def test_empty_medium_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Concept(id="c", name="C", tam=1.0, medium=[], categories=["product"])
+
+    def test_duplicate_medium_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Concept(
+                id="c", name="C", tam=1.0, medium=["digital", "digital"], categories=["product"]
             )
 
 

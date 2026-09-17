@@ -191,10 +191,24 @@ class TestRowToDict:
         }
         result = concept_row_to_dict(row)
         assert result["tam"] == 5.0
+        assert result["medium"] == ["digital"]
         assert result["categories"] == ["product", "service", "experience"]
         assert result["modifiers"] == [
             {"type": "modify_requirement", "dim": "all", "op": "multiply", "value": 2}
         ]
+
+    def test_concept_row_multiple_mediums(self) -> None:
+        row = {
+            "id": "augmented_reality",
+            "name": "Augmented Reality",
+            "tam": "0.75",
+            "medium": "physical, digital",
+            "categories": "experience",
+            "flavor": "",
+            "art": "",
+        }
+        result = concept_row_to_dict(row)
+        assert result["medium"] == ["physical", "digital"]
 
     def test_dvf_row(self) -> None:
         row = {

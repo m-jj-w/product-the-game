@@ -101,7 +101,7 @@ def make_concepts(count: int = 6) -> dict[str, Concept]:
             id=f"concept_{i}",
             name=f"Test Concept {i}",
             tam=0.3,
-            medium="digital",
+            medium=["digital"],
             categories=["product"],
         )
         for i in range(count)

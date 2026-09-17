@@ -66,7 +66,7 @@ def qualifies(
 def _filter_matches(concept_filter: ConceptFilter | None, card: Concept) -> bool:
     if concept_filter is None:
         return True
-    if concept_filter.medium is not None and concept_filter.medium != card.medium:
+    if concept_filter.medium is not None and concept_filter.medium not in card.medium:
         return False
     if concept_filter.category is not None and concept_filter.category not in card.categories:
         return False
