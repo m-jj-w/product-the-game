@@ -29,6 +29,8 @@ gcloud run deploy "$SERVICE" \
   --set-env-vars="AUTH_USERNAME=play,GOOGLE_CLOUD_PROJECT=$PROJECT" \
   --set-secrets="AUTH_PASSWORD=product-the-game-password:latest"
 
+(cd frontend && npm install && npm run build)
+
 firebase deploy --only "hosting:$SERVICE" --project "$PROJECT"
 
 echo

@@ -1,14 +1,18 @@
 {
   "hosting": {
     "target": "product-the-game",
-    "public": "public",
+    "public": "frontend/dist",
     "rewrites": [
       {
-        "source": "**",
+        "source": "/api/**",
         "run": {
           "serviceId": "product-the-game",
           "region": "us-east1"
         }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
       }
     ]
   }
