@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { chooseAction, createGame, getBoard, getConcepts, getGame } from './api'
+import { AuthRequiredError, chooseAction, createGame, getBoard, getConcepts, getGame, onAuthRequired } from './api'
 import BoardPanel from './components/BoardPanel'
 import DecisionPanel from './components/DecisionPanel'
 import Header from './components/Header'
 import HistoryPanel from './components/HistoryPanel'
+import LoginGate from './components/LoginGate'
 import NewGameForm from './components/NewGameForm'
 import PortfolioPanel from './components/PortfolioPanel'
 import RulesModal from './components/RulesModal'
@@ -22,32 +23,48 @@ function App() {
   const [resumingGame, setResumingGame] = useState(
     () => new URLSearchParams(window.location.search).has('game'),
   )
+  const [authRequired, setAuthRequired] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
 
-  useEffect(() => {
-    getBoard()
-      .then(setBoard)
-      .catch((e: unknown) => setError(errorMessage(e)))
-    getConcepts()
-      .then((r) => setConcepts(r.concepts))
-      .catch((e: unknown) => setError(errorMessage(e)))
+  async function loadInitialData() {
+    try {
+      setBoard(await getBoard())
+    } catch (e) {
+      if (!(e instanceof AuthRequiredError)) setError(errorMessage(e))
+    }
+    try {
+      setConcepts((await getConcepts()).concepts)
+    } catch (e) {
+      if (!(e instanceof AuthRequiredError)) setError(errorMessage(e))
+    }
 
     // The game id lives in the URL (not localStorage) so a page refresh
     // resumes the same game via the server-persisted history, and the URL
     // stays shareable/bookmarkable.
     const resumeId = new URLSearchParams(window.location.search).get('game')
-    if (resumeId) {
-      getGame(resumeId)
-        .then(setGame)
-        .catch((e: unknown) => {
-          setError(errorMessage(e))
-          window.history.replaceState({}, '', window.location.pathname)
-        })
-        .finally(() => setResumingGame(false))
+    if (!resumeId) {
+      setResumingGame(false)
+      return
     }
+    setResumingGame(true)
+    try {
+      setGame(await getGame(resumeId))
+    } catch (e) {
+      if (!(e instanceof AuthRequiredError)) {
+        setError(errorMessage(e))
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+    } finally {
+      setResumingGame(false)
+    }
+  }
+
+  useEffect(() => {
+    onAuthRequired(() => setAuthRequired(true))
+    void loadInitialData()
   }, [])
 
   const conceptsById = useMemo(() => Object.fromEntries(concepts.map((c) => [c.id, c])), [concepts])
@@ -61,7 +78,7 @@ function App() {
       setSelectedConceptId(null)
       window.history.pushState({}, '', `?game=${view.game_id}`)
     } catch (e) {
-      setError(errorMessage(e))
+      if (!(e instanceof AuthRequiredError)) setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -74,7 +91,7 @@ function App() {
     try {
       setGame(await chooseAction(game.game_id, actionIndex))
     } catch (e) {
-      setError(errorMessage(e))
+      if (!(e instanceof AuthRequiredError)) setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -84,7 +101,15 @@ function App() {
     <div className="app">
       <Header game={game} onOpenRules={() => setRulesOpen(true)} />
       {error && <div className="error-banner">{error}</div>}
-      {resumingGame ? (
+      {authRequired ? (
+        <LoginGate
+          onSuccess={() => {
+            setAuthRequired(false)
+            setError(null)
+            loadInitialData()
+          }}
+        />
+      ) : resumingGame ? (
         <p className="empty-note">Loading…</p>
       ) : !game ? (
         <NewGameForm onSubmit={handleNewGame} busy={busy} />

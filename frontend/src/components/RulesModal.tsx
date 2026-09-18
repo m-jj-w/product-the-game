@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getRules } from '../api'
+import { AuthRequiredError, getRules } from '../api'
 
 export default function RulesModal({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState<string | null>(null)
@@ -8,7 +8,13 @@ export default function RulesModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     getRules()
       .then((r) => setText(r.text))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        // AuthRequiredError already triggers the app-level LoginGate
+        // (App.tsx's onAuthRequired handler) -- nothing more to show here.
+        if (!(e instanceof AuthRequiredError)) {
+          setError(e instanceof Error ? e.message : String(e))
+        }
+      })
   }, [])
 
   return (
