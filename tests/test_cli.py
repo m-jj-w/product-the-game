@@ -23,7 +23,7 @@ def client():
 
 
 def _new_game(client, player_ids, seed=1):
-    response = client.post("/games", json={"player_ids": list(player_ids), "seed": seed})
+    response = client.post("/api/games", json={"player_ids": list(player_ids), "seed": seed})
     assert response.status_code == 200, response.text
     return response.json()["game_id"]
 
@@ -75,7 +75,7 @@ class TestAllHumanGame:
         assert input_fn.call_count == 3
         # confirm the server-side game actually advanced, not just the
         # local loop's own bookkeeping
-        assert client.get(f"/games/{game_id}").json() == view
+        assert client.get(f"/api/games/{game_id}").json() == view
 
     def test_invalid_input_is_rejected_and_reprompted(self, client) -> None:
         game_id = _new_game(client, ["alice"], seed=5)
@@ -95,7 +95,7 @@ class TestAllHumanGame:
 class TestMixedHumanAgentGame:
     def test_agent_seat_handles_its_decision_without_prompting_a_human(self, client) -> None:
         game_id = _new_game(client, ["alice", "bob"], seed=5)
-        active = client.get(f"/games/{game_id}").json()["decision_owner"]
+        active = client.get(f"/api/games/{game_id}").json()["decision_owner"]
         other = "bob" if active == "alice" else "alice"
 
         seats = [
@@ -121,7 +121,7 @@ class TestMixedHumanAgentGame:
 
     def test_human_seat_handles_its_decision_without_calling_the_llm(self, client) -> None:
         game_id = _new_game(client, ["alice", "bob"], seed=5)
-        active = client.get(f"/games/{game_id}").json()["decision_owner"]
+        active = client.get(f"/api/games/{game_id}").json()["decision_owner"]
         other = "bob" if active == "alice" else "alice"
 
         seats = [
@@ -147,7 +147,7 @@ class TestMixedHumanAgentGame:
 
     def test_unconfigured_seat_raises_a_clear_error(self, client) -> None:
         game_id = _new_game(client, ["alice", "bob"], seed=5)
-        active = client.get(f"/games/{game_id}").json()["decision_owner"]
+        active = client.get(f"/api/games/{game_id}").json()["decision_owner"]
         other = "bob" if active == "alice" else "alice"
         seats = [SeatConfig(other, "human")]  # nobody configured for `active`
 

@@ -70,7 +70,7 @@ def _prompt_new_game_seats() -> list[SeatConfig]:
 
 
 def _prompt_existing_game_seats(http: httpx.Client, game_id: str) -> list[SeatConfig]:
-    response = http.get(f"/games/{game_id}")
+    response = http.get(f"/api/games/{game_id}")
     response.raise_for_status()
     player_ids = [p["id"] for p in response.json()["players"]]
     print(f"Joining game {game_id} -- players: {', '.join(player_ids)}")
@@ -91,7 +91,7 @@ def main() -> None:
 
     http = httpx.Client(base_url=args.base_url, timeout=30.0)
     try:
-        http.get("/")
+        http.get("/api/board")
     except httpx.ConnectError:
         print(f"Can't reach the server at {args.base_url}.")
         print("Start it first: uvicorn server.app:app --host 127.0.0.1 --port 8420")
@@ -105,7 +105,7 @@ def main() -> None:
         payload: dict = {"player_ids": [s.player_id for s in seats]}
         if args.seed is not None:
             payload["seed"] = args.seed
-        response = http.post("/games", json=payload)
+        response = http.post("/api/games", json=payload)
         if response.status_code != 200:
             print(f"Couldn't create game: {response.json().get('detail')}")
             sys.exit(1)

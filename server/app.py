@@ -1,8 +1,9 @@
-"""Lightweight hot-seat web server for Product: The Game.
+"""Product: The Game's JSON API.
 
-One browser tab, players pass it around and discuss out loud -- matches
-rules.md sec 3 ("the players discuss and the PM makes the final call").
-No player identity, no sessions, no websockets: nothing needs to push an
+A pure API under /api/* -- Firebase Hosting serves the built React
+frontend (frontend/dist) directly as static files, rewriting only
+/api/** to this Cloud Run service (see firebase.json, deploy.sh). No
+player identity, no sessions, no websockets: nothing needs to push an
 update to an idle client, so plain request/response is enough.
 
 Games persist through a GameStore (server/store.py) -- in-memory by
@@ -16,14 +17,13 @@ from __future__ import annotations
 import os
 import random
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agents.llm_agent import SPACE_LABELS, describe_action
+from agents.llm_agent import RULES_PATH, describe_action, describe_skill
 from engine.engine import (
     NewGameConfig,
     apply,
@@ -33,18 +33,24 @@ from engine.engine import (
     new_game,
     observe,
 )
-from engine.rules import Action, CrossMilestone, MoveConcept
+from engine.modifiers import compute_skill_buffs, required_dvf
 from engine.schema import GameData, load_game_data
-from engine.state import GameState, get_concept
+from engine.state import GameState
 from server.auth import BasicAuthMiddleware
-from server.store import FirestoreGameStore, GameRecord, GameStore, InMemoryGameStore, replay
+from server.store import (
+    FirestoreGameStore,
+    GameRecord,
+    GameStore,
+    HistoryEntry,
+    InMemoryGameStore,
+    narrate_step,
+    replay_with_history,
+)
 
-STATIC_DIR = Path(__file__).parent / "static"
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 app = FastAPI(title="Product: The Game")
 app.add_middleware(BasicAuthMiddleware)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 _STORE: GameStore = (
     FirestoreGameStore() if os.environ.get("GOOGLE_CLOUD_PROJECT") else InMemoryGameStore()
@@ -80,6 +86,7 @@ class PlayerView(BaseModel):
     role_id: str
     skill_id: str | None
     skill_name: str | None
+    skill_effect_summary: str | None
 
 
 class PortfolioItem(BaseModel):
@@ -88,6 +95,8 @@ class PortfolioItem(BaseModel):
     quadrant: str
     offset: int
     tokens: dict[str, int]
+    buffs: dict[str, int]
+    required: dict[str, int]
 
 
 class ActionOption(BaseModel):
@@ -98,6 +107,12 @@ class ActionOption(BaseModel):
 class OutcomeView(BaseModel):
     result: str
     reason: str
+
+
+class HistoryEntryView(BaseModel):
+    turn: int
+    text: str
+    at: str
 
 
 class GameView(BaseModel):
@@ -112,7 +127,7 @@ class GameView(BaseModel):
     decision_owner: str | None
     options: list[ActionOption]
     outcome: OutcomeView | None
-    last_event: str | None = None
+    history: list[HistoryEntryView]
 
 
 class QuadrantView(BaseModel):
@@ -121,15 +136,31 @@ class QuadrantView(BaseModel):
     order: int
     spaces: list[str]
     milestone_name: str
+    milestone_requirement: dict[str, int]
 
 
 class BoardView(BaseModel):
     quadrants: list[QuadrantView]
 
 
-def _build_view(
-    game_id: str, state: GameState, seed: int, last_event: str | None = None
-) -> GameView:
+class ConceptView(BaseModel):
+    id: str
+    name: str
+    tam: float
+    medium: list[str]
+    categories: list[str]
+    flavor: str | None
+
+
+class ConceptsView(BaseModel):
+    concepts: list[ConceptView]
+
+
+class RulesView(BaseModel):
+    text: str
+
+
+def _build_view(game_id: str, state: GameState, seed: int, history: list[HistoryEntry]) -> GameView:
     decision = current_decision(state)
     outcome = is_over(state)
 
@@ -139,19 +170,29 @@ def _build_view(
             role_id=p.role_id,
             skill_id=p.skill_id,
             skill_name=state.data.skills[p.skill_id].name if p.skill_id else None,
+            skill_effect_summary=(
+                describe_skill(state.data.skills[p.skill_id]) if p.skill_id else None
+            ),
         )
         for p in state.players
     ]
-    portfolio = [
-        PortfolioItem(
-            card_id=c.card_id,
-            name=state.data.concepts[c.card_id].name,
-            quadrant=c.position.quadrant_id,
-            offset=c.position.offset,
-            tokens={"D": c.tokens.D, "V": c.tokens.V, "F": c.tokens.F},
+    portfolio = []
+    for c in state.portfolio:
+        card = state.data.concepts[c.card_id]
+        quadrant = state.data.board.quadrant(c.position.quadrant_id)
+        buffs = compute_skill_buffs(state, card)
+        required = required_dvf(card, quadrant)
+        portfolio.append(
+            PortfolioItem(
+                card_id=c.card_id,
+                name=card.name,
+                quadrant=c.position.quadrant_id,
+                offset=c.position.offset,
+                tokens={"D": c.tokens.D, "V": c.tokens.V, "F": c.tokens.F},
+                buffs={"D": buffs.D, "V": buffs.V, "F": buffs.F},
+                required={"D": required.D, "V": required.V, "F": required.F},
+            )
         )
-        for c in state.portfolio
-    ]
     options = (
         [
             ActionOption(index=i, description=describe_action(a, state))
@@ -174,66 +215,8 @@ def _build_view(
         decision_owner=decision.owner if decision is not None else None,
         options=options,
         outcome=OutcomeView(result=outcome.result, reason=outcome.reason) if outcome else None,
-        last_event=last_event,
+        history=[HistoryEntryView(turn=h.turn, text=h.text, at=h.at) for h in reversed(history)],
     )
-
-
-def _narrate(old_state: GameState, new_state: GameState, action: Action) -> str:
-    """A past-tense line describing what `action` just did -- for the web
-    UI's rolling activity log (GameView.last_event). Falls back to the
-    action's own (already past-tense-ish) description for anything not
-    specially handled below."""
-    if isinstance(action, MoveConcept):
-        instance = get_concept(new_state, action.concept_id)
-        card = new_state.data.concepts[instance.card_id]
-        if instance.position.offset == 0:
-            return f"{card.name} landed on the Gateway."
-
-        quadrant = new_state.data.board.quadrant(instance.position.quadrant_id)
-        space_type = quadrant.spaces[instance.position.offset - 1]
-        label = SPACE_LABELS[space_type]
-
-        if space_type in ("D", "V", "F"):
-            deck = new_state.dvf_sub_decks[(quadrant.id, space_type)]
-            drawn_id = deck.discard_pile[-1]
-            drawn_name = next(
-                c.name for c in new_state.data.dvf_decks[quadrant.id].cards if c.id == drawn_id
-            )
-            return f"{card.name} landed on a {label} space and drew '{drawn_name}'!"
-
-        if space_type == "chance":
-            drawn_id = new_state.chance_deck.discard_pile[-1]
-            drawn_name = new_state.data.chance_cards[drawn_id].name
-            return f"{card.name} landed on a {label} space and drew '{drawn_name}'!"
-
-        # skills: drawn for the active player, not the Concept itself
-        if new_state.pending_skill is not None:
-            skill_name = new_state.data.skills[new_state.pending_skill].name
-            return f"{card.name} landed on a {label} space -- drew '{skill_name}' (not eligible)."
-        old_skills = {p.id: p.skill_id for p in old_state.players}
-        newly_skilled = next(
-            (p for p in new_state.players if p.skill_id and p.skill_id != old_skills.get(p.id)),
-            None,
-        )
-        if newly_skilled is not None:
-            skill_name = new_state.data.skills[newly_skilled.skill_id].name
-            return (
-                f"{card.name} landed on a {label} space -- {newly_skilled.id} drew '{skill_name}'!"
-            )
-        return f"{card.name} landed on a {label} space."
-
-    if isinstance(action, CrossMilestone):
-        card = new_state.data.concepts[action.concept_id]
-        if not action.cross:
-            return f"{card.name} declined to cross the Milestone."
-        still_active = any(c.card_id == action.concept_id for c in new_state.portfolio)
-        if not still_active:
-            return f"{card.name} reached Finish and banked ${card.tam:.2f}B!"
-        instance = get_concept(new_state, action.concept_id)
-        quadrant = new_state.data.board.quadrant(instance.position.quadrant_id)
-        return f"{card.name} crossed into {quadrant.name}!"
-
-    return describe_action(action, old_state)
 
 
 def _load_record(store: GameStore, game_id: str) -> GameRecord:
@@ -243,15 +226,7 @@ def _load_record(store: GameStore, game_id: str) -> GameRecord:
     return record
 
 
-@app.get("/")
-def index() -> FileResponse:
-    # No caching: this is the whole app (inline CSS/JS, no cache-busted
-    # asset filenames), so a stale cached copy after a deploy would look
-    # like the update never shipped.
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
-
-
-@app.get("/board", response_model=BoardView)
+@app.get("/api/board", response_model=BoardView)
 def get_board(data: GameData = Depends(get_game_data)) -> BoardView:
     """The board layout -- static for the life of a game, fetched once by
     the client rather than repeated in every GameView."""
@@ -264,13 +239,43 @@ def get_board(data: GameData = Depends(get_game_data)) -> BoardView:
                 order=q.order,
                 spaces=list(q.spaces),
                 milestone_name=q.milestone.name,
+                milestone_requirement={
+                    "D": q.milestone.requirement.D,
+                    "V": q.milestone.requirement.V,
+                    "F": q.milestone.requirement.F,
+                },
             )
             for q in quadrants
         ]
     )
 
 
-@app.post("/games", response_model=GameView)
+@app.get("/api/concepts", response_model=ConceptsView)
+def get_concepts(data: GameData = Depends(get_game_data)) -> ConceptsView:
+    """Every Concept's static definition -- fetched once, joined against
+    PortfolioItem.card_id client-side (keeps GameView from repeating
+    name/medium/categories/tam on every response)."""
+    return ConceptsView(
+        concepts=[
+            ConceptView(
+                id=c.id,
+                name=c.name,
+                tam=c.tam,
+                medium=list(c.medium),
+                categories=list(c.categories),
+                flavor=c.flavor,
+            )
+            for c in data.concepts.values()
+        ]
+    )
+
+
+@app.get("/api/rules", response_model=RulesView)
+def get_rules() -> RulesView:
+    return RulesView(text=RULES_PATH.read_text())
+
+
+@app.post("/api/games", response_model=GameView)
 def create_game(
     req: NewGameRequest,
     data: GameData = Depends(get_game_data),
@@ -285,21 +290,21 @@ def create_game(
     game_id = str(uuid.uuid4())
     record = GameRecord(player_ids=req.player_ids, seed=seed)
     store.save(game_id, record)
-    return _build_view(game_id, state, seed)
+    return _build_view(game_id, state, seed, [])
 
 
-@app.get("/games/{game_id}", response_model=GameView)
+@app.get("/api/games/{game_id}", response_model=GameView)
 def get_game(
     game_id: str,
     data: GameData = Depends(get_game_data),
     store: GameStore = Depends(get_game_store),
 ) -> GameView:
     record = _load_record(store, game_id)
-    state = replay(data, record)
-    return _build_view(game_id, state, record.seed)
+    state, history = replay_with_history(data, record)
+    return _build_view(game_id, state, record.seed, history)
 
 
-@app.post("/games/{game_id}/actions", response_model=GameView)
+@app.post("/api/games/{game_id}/actions", response_model=GameView)
 def choose_action(
     game_id: str,
     req: ChooseActionRequest,
@@ -307,7 +312,7 @@ def choose_action(
     store: GameStore = Depends(get_game_store),
 ) -> GameView:
     record = _load_record(store, game_id)
-    state = replay(data, record)
+    state, history = replay_with_history(data, record)
     if is_over(state) is not None:
         raise HTTPException(status_code=400, detail="game is already over")
 
@@ -320,11 +325,19 @@ def choose_action(
 
     chosen_action = actions[req.action_index]
     new_state = apply(state, chosen_action)
+    timestamp = datetime.now(UTC).isoformat()
     new_record = GameRecord(
         player_ids=record.player_ids,
         seed=record.seed,
         action_indices=[*record.action_indices, req.action_index],
+        action_timestamps=[*record.action_timestamps, timestamp],
     )
     store.save(game_id, new_record)
-    last_event = _narrate(state, new_state, chosen_action)
-    return _build_view(game_id, new_state, record.seed, last_event=last_event)
+
+    new_history = [
+        *history,
+        HistoryEntry(
+            turn=new_state.turn, text=narrate_step(state, new_state, chosen_action), at=timestamp
+        ),
+    ]
+    return _build_view(game_id, new_state, record.seed, new_history)

@@ -42,6 +42,7 @@ from engine.rules import (
     ResearchBreakthrough,
     RoleSwap,
 )
+from engine.schema import Skill
 from engine.state import GameState, get_concept
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.md"
@@ -61,6 +62,25 @@ class ActionChoice(BaseModel):
 
     action_index: int
     rationale: str
+
+
+def describe_skill(skill: Skill) -> str:
+    """Short human-readable summary of a Skill's effect(s), e.g.
+    '+1 V -- all Concepts' or 'Agile Methods'. Used by the web UI's Team
+    panel (PlayerView.skill_effect_summary)."""
+    parts = []
+    for effect in skill.effects:
+        if effect.type == "buff":
+            if effect.filter is None:
+                scope = "all Concepts"
+            else:
+                bits = [b for b in (effect.filter.medium, effect.filter.category) if b]
+                scope = " ".join(bits) + " Concepts" if bits else "all Concepts"
+            sign = "+" if effect.n >= 0 else ""
+            parts.append(f"{sign}{effect.n} {effect.dim} -- {scope}")
+        else:
+            parts.append(skill.name)
+    return "; ".join(parts) if parts else skill.name
 
 
 def _landing_preview(state: GameState, action: MoveConcept) -> str:

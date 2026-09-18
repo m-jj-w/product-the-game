@@ -98,7 +98,7 @@ def run_game_loop(
     (a testing/safety valve; the CLI itself always leaves it unbounded)."""
     steps = 0
     while True:
-        response = http.get(f"/games/{game_id}")
+        response = http.get(f"/api/games/{game_id}")
         response.raise_for_status()
         view = response.json()
 
@@ -126,6 +126,6 @@ def run_game_loop(
                 print_fn=print_fn,
             )
 
-        post_response = http.post(f"/games/{game_id}/actions", json={"action_index": index})
+        post_response = http.post(f"/api/games/{game_id}/actions", json={"action_index": index})
         post_response.raise_for_status()
         steps += 1
